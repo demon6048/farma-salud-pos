@@ -3,7 +3,7 @@ import { ShoppingCart, LogOut, Package, ShieldAlert, BarChart3, AlertTriangle, C
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, getDocs, limit, query, deleteDoc } from 'firebase/firestore';
 
-// --- CONFIGURACIÓN DE FIREBASE (Tus Llaves Exactas) ---
+// --- CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyBXcNlrIjGkmGF31HlA97WHqQAGV4-1mkU",
   authDomain: "farma-salud-pos.firebaseapp.com",
@@ -13,7 +13,6 @@ const firebaseConfig = {
   appId: "1:251729622472:web:d1ba9228b3966155797cfd"
 };
 
-// Inicialización
 let db = null;
 try {
   const app = initializeApp(firebaseConfig);
@@ -22,127 +21,108 @@ try {
   console.error("Error al inicializar Firebase:", e);
 }
 
-const INITIAL_PRODUCTS = [
-  { id: "P001", name: "Paracetamol 500 mg x 100 tab", category: "Analgésicos", price: 3.50, stock: 15, lots: [{ id: 'L1', lote: 'L-VENC-01', exp: '2026-08-15', qty: 15 }] },
-  { id: "P002", name: "Ibuprofeno 400 mg x 100 tab", category: "Antiinflamatorios", price: 5.00, stock: 90, lots: [{ id: 'L2', lote: 'L-VENC-02', exp: '2026-09-10', qty: 90 }] },
-  { id: "P003", name: "Amoxicilina 500 mg x 100 cap", category: "Antibióticos", price: 12.00, stock: 8, lots: [{ id: 'L3', lote: 'L-VENC-03', exp: '2025-12-31', qty: 8 }] },
-  { id: "P004", name: "Alcohol 70% Medicinal 1 Litro", category: "Insumos", price: 8.50, stock: 30, lots: [{ id: 'L4', lote: 'L-PROX-01', exp: '2026-10-01', qty: 30 }] }
-];
-
+// Iniciales solo para referencia. Ya no se auto-regeneran si la DB está vacía (excepto el staff).
 const INITIAL_STAFF = [
   { id: 'CAJ-001', name: 'Administrador Principal', role: 'ADMIN', joined: '10/09/2026' }
 ];
 
 export default function App() {
-  // App States
   const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('fs_user')) || null);
   const [cashSession, setCashSession] = useState(() => JSON.parse(localStorage.getItem('fs_cash')) || { isOpen: false, openingAmount: 0, declaredAmount: null, result: null, shiftId: null });
+  
   const [activeTab, setActiveTab] = useState(() => {
       const savedUser = JSON.parse(localStorage.getItem('fs_user'));
       const savedCash = JSON.parse(localStorage.getItem('fs_cash')) || { isOpen: false, result: null };
       
       if (!savedUser) return 'LOGIN';
       if (savedUser.role === 'ADMIN') return 'DASHBOARD';
-      if (savedCash.isOpen && !savedCash.result) return 'POS';
-      if (!savedCash.isOpen && savedCash.result) return 'CASH';
+      if (savedCash.isOpen && !savedCash.result) return 'POS'; 
+      if (!savedCash.isOpen && savedCash.result) return 'CASH'; 
       return 'OPEN_CASH';
   }); 
 
   const [dbStatus, setDbStatus] = useState('VERIFICANDO...'); 
   
-  // Real-Time States (Sincronizados con Firebase)
-  const [products, setProducts] = useState(INITIAL_PRODUCTS);
-  const [staff, setStaff] = useState(INITIAL_STAFF);
+  // --- ESTADOS EN TIEMPO REAL ---
+  const [products, setProducts] = useState([]);
+  const [staff, setStaff] = useState([]);
   const [sales, setSales] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [invoices, setInvoices] = useState([]);
   
-  // UI & Form States
+  // --- ESTADOS DE UI Y FORMULARIOS ---
   const [adminLoginModal, setAdminLoginModal] = useState(false);
   const [cashierLoginModal, setCashierLoginModal] = useState(false);
   const [authModal, setAuthModal] = useState({ isOpen: false, action: null, payload: null, error: '' });
-  const [successCheckoutModal, setSuccessCheckoutModal] = useState({ isOpen: false, saleData: null });
+  
+  // Modales de Edición Admin
+  const [editProdModal, setEditProdModal] = useState({ isOpen: false, id: '', name: '', category: '', price: '' });
+  const [editInvModal, setEditInvModal] = useState({ isOpen: false, id: '', supplier: '', document: '', totalCost: '' });
+  
   const [alerts, setAlerts] = useState([]);
   const [openingAmount, setOpeningAmount] = useState(''); 
   const [closingAmount, setClosingAmount] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false); // Estado para la animación de carga del botón
   
   const [newStaffForm, setNewStaffForm] = useState({ name: '' });
   const [newProductForm, setNewProductForm] = useState({ name: '', category: '', price: '' });
   const [invoiceForm, setInvoiceForm] = useState({ supplier: '', document: '', productId: '', qty: '', lote: '', expDate: '', totalCost: '' });
-  const [priceEditForm, setPriceEditForm] = useState({ isOpen: false, product: null, newPrice: '', reason: '' });
   
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Persistencia de Sesión Local
   useEffect(() => {
-    localStorage.setItem('fs_user', JSON.stringify(currentUser));
+    if (currentUser) localStorage.setItem('fs_user', JSON.stringify(currentUser));
   }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem('fs_cash', JSON.stringify(cashSession));
   }, [cashSession]);
 
-  // --- 1. MOTOR DE SINCRONIZACIÓN FIREBASE (TIEMPO REAL) ---
+  // --- CONEXIÓN FIREBASE EN TIEMPO REAL ---
   useEffect(() => {
     if (!db) {
        setDbStatus('LOCAL');
-       showAlert("No se configuró Firebase. Operando offline.", "error");
        return;
     }
 
     const initFirebase = async () => {
         try {
-            // Test connection
             const testQuery = query(collection(db, 'system_test'), limit(1));
             await getDocs(testQuery);
             setDbStatus('CONECTADO');
             
-            // Listeners en Tiempo Real
             const unsubProducts = onSnapshot(collection(db, 'products'), (snap) => {
-                if (snap.empty) {
-                    INITIAL_PRODUCTS.forEach(p => setDoc(doc(db, 'products', p.id), p));
-                } else {
-                    setProducts(snap.docs.map(d => d.data()));
-                }
+                setProducts(snap.docs.map(d => d.data())); // Ya no auto-genera los 4 productos de prueba
             });
 
             const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-                if (snap.empty) {
-                    INITIAL_STAFF.forEach(s => setDoc(doc(db, 'staff', s.id), s));
-                } else {
-                    setStaff(snap.docs.map(d => d.data()));
-                }
+                if (snap.empty) INITIAL_STAFF.forEach(s => setDoc(doc(db, 'staff', s.id), s));
+                else setStaff(snap.docs.map(d => d.data()));
             });
 
             const unsubSales = onSnapshot(collection(db, 'sales'), (snap) => {
                 const data = snap.docs.map(d => d.data());
-                setSales(data.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0))); 
+                setSales(data.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
             });
 
             const unsubInvoices = onSnapshot(collection(db, 'invoices'), (snap) => {
-                const data = snap.docs.map(d => d.data());
-                setInvoices(data.sort((a,b) => b.id.localeCompare(a.id))); 
+                setInvoices(snap.docs.map(d => d.data()).sort((a,b) => b.id.localeCompare(a.id))); 
             });
 
             const unsubAudit = onSnapshot(collection(db, 'auditLogs'), (snap) => {
-                const data = snap.docs.map(d => d.data());
-                setAuditLogs(data.sort((a,b) => b.logId.localeCompare(a.logId)));
+                setAuditLogs(snap.docs.map(d => d.data()).sort((a,b) => b.logId.localeCompare(a.logId)));
             });
 
             return () => { unsubProducts(); unsubStaff(); unsubSales(); unsubInvoices(); unsubAudit(); };
         } catch (error) {
             console.error(error);
             setDbStatus('LOCAL');
-            showAlert("Conexión rechazada. Asegúrese de configurar las Reglas en Firebase a 'true'.", "error");
         }
     };
 
     initFirebase();
   }, []);
 
-  // --- UTILIDADES ---
   const formatCurrency = (amount) => `S/ ${parseFloat(amount).toFixed(2)}`;
   const getTimestamp = () => {
     const now = new Date();
@@ -160,26 +140,23 @@ export default function App() {
     const logId = `L-${Date.now()}`;
     const newLog = { logId, date, time, user: currentUser?.name || 'SISTEMA', action, detail };
     if (dbStatus === 'CONECTADO') {
-        try { await setDoc(doc(db, 'auditLogs', logId), newLog); } catch(e) { console.error(e); }
+        try { await setDoc(doc(db, 'auditLogs', logId), newLog); } catch(e) {}
     } else {
-        setAuditLogs(prev => [newLog, ...prev]); // Fallback memory
+        setAuditLogs(prev => [newLog, ...prev]); 
     }
   };
 
-  // --- IMPRESIÓN Y PDF ---
+  // --- MÓDULO DE IMPRESIÓN Y PDF ---
   const generateTicketHTML = (sale) => {
-      // Diseño optimizado para impresoras térmicas pequeñas (aprox 58mm/80mm)
       return `
           <html>
               <head>
                   <title>Ticket ${sale.id}</title>
                   <style>
-                      body { font-family: 'Courier New', Courier, monospace; font-size: 12px; width: 300px; margin: 0 auto; padding: 10px; color: #000; }
+                      body { font-family: 'Courier New', Courier, monospace; font-size: 12px; width: 300px; margin: 0 auto; padding: 20px; color: #000; }
                       h2, h3 { text-align: center; margin: 5px 0; }
                       .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
                       .item { display: flex; justify-content: space-between; margin-bottom: 5px; }
-                      .item-name { max-width: 65%; word-wrap: break-word; }
-                      .item-price { max-width: 35%; text-align: right; }
                       .total { font-weight: bold; font-size: 14px; text-align: right; margin-top: 10px; }
                       .footer { text-align: center; font-size: 10px; margin-top: 20px; }
                   </style>
@@ -194,13 +171,13 @@ export default function App() {
                   <div class="divider"></div>
                   ${sale.items.map(item => `
                       <div class="item">
-                          <span class="item-name">${item.qty}x ${item.name}</span>
-                          <span class="item-price">S/ ${item.subtotal.toFixed(2)}</span>
+                          <span>${item.qty}x ${item.name}</span>
+                          <span>S/ ${item.subtotal.toFixed(2)}</span>
                       </div>
                   `).join('')}
                   <div class="divider"></div>
                   <div class="total">TOTAL: S/ ${sale.total.toFixed(2)}</div>
-                  <div class="footer">¡Gracias por su compra!<br>Conservar este comprobante en caso de devoluciones.</div>
+                  <div class="footer">¡Gracias por su compra!<br>Conservar este comprobante.</div>
               </body>
           </html>
       `;
@@ -208,7 +185,7 @@ export default function App() {
 
   const handlePrintReal = (sale) => {
       const ticketWindow = window.open('', '_blank', 'width=400,height=600');
-      if(!ticketWindow) return showAlert('El navegador bloqueó la ventana emergente. Por favor, permita las ventanas emergentes (pop-ups) para imprimir.', 'error');
+      if(!ticketWindow) return showAlert('El navegador bloqueó la ventana emergente. Permita los pop-ups.', 'error');
       
       ticketWindow.document.write(generateTicketHTML(sale));
       ticketWindow.document.close();
@@ -218,7 +195,7 @@ export default function App() {
           ticketWindow.print();
           ticketWindow.close();
       }, 250);
-      addAuditLog("IMPRESIÓN TICKET", `Se imprimió el ticket térmico ${sale.id}.`);
+      addAuditLog("IMPRESIÓN TICKET", `Se imprimió el ticket ${sale.id}.`);
   };
 
   const handleDownloadPDF = (sale) => {
@@ -237,124 +214,28 @@ export default function App() {
   const executePDFDownload = (sale) => {
       const element = document.createElement('div');
       element.innerHTML = generateTicketHTML(sale);
-      
       const opt = {
-          margin:       5,
-          filename:     `Ticket_FarmaSalud_${sale.id}.pdf`,
-          image:        { type: 'jpeg', quality: 0.98 },
-          html2canvas:  { scale: 2 },
-          jsPDF:        { unit: 'mm', format: [80, 150], orientation: 'portrait' } 
+          margin: 5, filename: `Ticket_FarmaSalud_${sale.id}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 },
+          jsPDF: { unit: 'mm', format: [80, 150], orientation: 'portrait' } 
       };
-
       window.html2pdf().set(opt).from(element).save().then(() => {
           addAuditLog("DESCARGA PDF", `Se descargó el ticket ${sale.id} en PDF`);
-          showAlert('PDF generado y descargado correctamente.', 'success');
+          showAlert('PDF descargado correctamente.', 'success');
       });
   };
 
-
-  // --- GESTIÓN DE PERSONAL ---
-  const handleAddStaff = async (e) => {
-    e.preventDefault();
-    if (!newStaffForm.name.trim()) return showAlert('Ingrese el nombre del cajero.', 'error');
-    const newId = `CAJ-${Date.now().toString().slice(-4)}`;
-    const newEmployee = { id: newId, name: newStaffForm.name.trim(), role: 'CAJERO', joined: getTimestamp().date };
-    
-    if (dbStatus === 'CONECTADO') {
-        await setDoc(doc(db, 'staff', newId), newEmployee);
-        addAuditLog("NUEVO CAJERO", `Cajero registrado: ${newEmployee.name}`);
-        showAlert('Cajero registrado y guardado en la nube.', 'success');
-        setNewStaffForm({ name: '' });
-    }
-  };
-
-  const handleDeleteStaff = async (staffId) => {
-      if(staffId === 'CAJ-001') return showAlert('No puede eliminar al administrador principal.', 'error');
-      if (dbStatus === 'CONECTADO') {
-          await deleteDoc(doc(db, 'staff', staffId));
-          addAuditLog("ELIMINA CAJERO", `Personal retirado: ID ${staffId}`);
-          showAlert('Cajero eliminado de la base de datos.', 'info');
-      }
-  };
-
-  // --- MÓDULOS DE ADMINISTRADOR (PRODUCTOS Y COMPRAS) ---
-  const handleAddProduct = async (e) => {
-    e.preventDefault();
-    if (!newProductForm.name || !newProductForm.category || !newProductForm.price) return showAlert('Llene todos los campos.', 'error');
-    
-    const newId = `P${Date.now().toString().slice(-5)}`;
-    const newProd = {
-      id: newId, name: newProductForm.name, category: newProductForm.category, price: parseFloat(newProductForm.price), stock: 0, lots: []
-    };
-    
-    if (dbStatus === 'CONECTADO') {
-        await setDoc(doc(db, 'products', newId), newProd);
-        addAuditLog("NUEVO PRODUCTO", `Producto creado en catálogo: ${newProd.name}`);
-        showAlert('Producto añadido al catálogo de Firebase.', 'success');
-        setNewProductForm({ name: '', category: '', price: '' });
-    }
-  };
-
-  const handleInvoiceSubmit = async (e) => {
-    e.preventDefault();
-    const { supplier, document: docNum, productId, qty, lote, expDate, totalCost } = invoiceForm;
-    const numQty = parseInt(qty);
-    
-    if(!supplier || !docNum || !productId || isNaN(numQty) || !lote || !expDate) return showAlert("Llene todos los campos de la compra.", "error");
-
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
-
-    const newLot = { id: `L-${Date.now()}`, lote: lote.trim().toUpperCase(), exp: expDate, qty: numQty };
-    const updatedLots = [...product.lots, newLot];
-    
-    const invId = `INV-${Date.now()}`;
-    const newInvoice = {
-        id: invId, date: getTimestamp().date, supplier, document: docNum, product: product.name, qty: numQty, cost: parseFloat(totalCost || 0), user: currentUser.name
-    };
-
-    if (dbStatus === 'CONECTADO') {
-        await setDoc(doc(db, 'products', product.id), { ...product, stock: product.stock + numQty, lots: updatedLots });
-        await setDoc(doc(db, 'invoices', invId), newInvoice);
-        addAuditLog("RECEPCIÓN MERCADERÍA", `Factura ${docNum}: +${numQty} unidades de ${product.name}`);
-        showAlert("Inventario actualizado y guardado en la nube.", "success");
-        setInvoiceForm({ supplier: '', document: '', productId: '', qty: '', lote: '', expDate: '', totalCost: '' });
-    }
-  };
-
-
-  // --- LOGIN LOGIC ---
-  const handleAdminLogin = () => {
-      setCurrentUser({ id: 'ADMIN-ROOT', name: 'Administrador Principal', role: 'ADMIN' });
-      setActiveTab('DASHBOARD');
-      addAuditLog("INICIO SESIÓN", "Acceso Administrador Principal");
-      setAdminLoginModal(false);
-  };
-
-  const handleCashierLogin = (staffMember) => {
-      setCurrentUser({ id: staffMember.id, name: staffMember.name, role: staffMember.role });
-      setActiveTab(cashSession.isOpen && !cashSession.result ? 'POS' : 'OPEN_CASH');
-      addAuditLog("INICIO SESIÓN", `Acceso de personal: ${staffMember.name}`);
-      setCashierLoginModal(false);
-  };
-
-  const handleLogout = () => {
-      if (currentUser?.role === 'CAJERO' && cashSession.isOpen) {
-          showAlert("¡ACCESO DENEGADO! Debe realizar el Cierre de Caja antes de cerrar sesión.", "error");
-          setActiveTab('CASH');
-          return;
-      }
-      addAuditLog("CIERRE SESIÓN", `${currentUser.name} cerró el sistema.`);
-      setCurrentUser(null);
-      setActiveTab('LOGIN');
-  };
-
-  // --- CAJA Y POS ---
+  // --- CONTROL DE CAJA ---
   const handleOpenCashRegister = (e) => {
     e.preventDefault();
     const amount = parseFloat(openingAmount);
+    if (isNaN(amount) || amount < 0) return showAlert("Monto inválido.", "error");
+
     const shiftId = `TURNO-${Date.now()}`;
-    setCashSession({ isOpen: true, openingAmount: amount, declaredAmount: null, result: null, shiftId });
+    const newSession = { isOpen: true, openingAmount: amount, declaredAmount: null, result: null, shiftId };
+    
+    localStorage.setItem('fs_cash', JSON.stringify(newSession));
+    setCashSession(newSession);
     addAuditLog("APERTURA CAJA", `Fondo inicial registrado: S/ ${amount}`);
     setActiveTab('POS');
   };
@@ -370,17 +251,59 @@ export default function App() {
     const expected = cashSession.openingAmount + totalSalesAmount;
     const difference = declared - expected;
 
-    setCashSession(prev => ({ ...prev, isOpen: false, declaredAmount: declared, result: { expected, difference } }));
+    const closedSession = { ...cashSession, isOpen: false, declaredAmount: declared, result: { expected, difference } };
+    
+    localStorage.setItem('fs_cash', JSON.stringify(closedSession));
+    setCashSession(closedSession);
+
     addAuditLog("CIERRE CAJA CIEGO", `Se declaró S/ ${declared}. Esperado: S/ ${expected}. Diferencia: S/ ${difference}`);
     showAlert(`Cierre procesado. Diferencia detectada: S/ ${difference}`, difference === 0 ? 'success' : 'error');
   };
 
   const handleArchiveShift = () => {
-    setCashSession({ isOpen: false, openingAmount: 0, declaredAmount: null, result: null, shiftId: null });
+    const cleanSession = { isOpen: false, openingAmount: 0, declaredAmount: null, result: null, shiftId: null };
+    localStorage.setItem('fs_cash', JSON.stringify(cleanSession));
+    setCashSession(cleanSession);
     setActiveTab('OPEN_CASH');
     setClosingAmount('');
   };
 
+  const handleLogout = () => {
+      if (currentUser?.role === 'CAJERO' && cashSession.isOpen) {
+          showAlert("¡ACCESO DENEGADO! Debe realizar el Cierre de Caja antes de cerrar sesión.", "error");
+          setActiveTab('CASH');
+          return;
+      }
+      
+      addAuditLog("CIERRE SESIÓN", `${currentUser.name} cerró el sistema.`);
+      setCurrentUser(null);
+      localStorage.removeItem('fs_user');
+      setActiveTab('LOGIN');
+  };
+
+  const handleAdminLogin = () => {
+      const adminUser = { id: 'ADMIN-ROOT', name: 'Administrador Principal', role: 'ADMIN' };
+      setCurrentUser(adminUser);
+      localStorage.setItem('fs_user', JSON.stringify(adminUser));
+      setActiveTab('DASHBOARD');
+      addAuditLog("INICIO SESIÓN", "Acceso Administrador Principal");
+      setAdminLoginModal(false);
+  };
+
+  const handleCashierLogin = (staffMember) => {
+      const newUser = { id: staffMember.id, name: staffMember.name, role: staffMember.role };
+      setCurrentUser(newUser);
+      localStorage.setItem('fs_user', JSON.stringify(newUser));
+      
+      if (cashSession.isOpen && !cashSession.result) setActiveTab('POS');
+      else if (!cashSession.isOpen && cashSession.result) setActiveTab('CASH');
+      else setActiveTab('OPEN_CASH');
+      
+      addAuditLog("INICIO SESIÓN", `Acceso de personal: ${staffMember.name}`);
+      setCashierLoginModal(false);
+  };
+
+  // --- POS Y CARRITO ---
   const addToCart = (product) => {
     if (!cashSession.isOpen) return showAlert("Debe abrir la caja primero.", "error");
     if (product.stock <= 0) return showAlert("Producto sin stock.", "error");
@@ -407,48 +330,40 @@ export default function App() {
     }).filter(item => item.qty > 0));
   };
 
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [successModal, setSuccessModal] = useState({ isOpen: false, sale: null });
+
   const processCheckout = async () => {
     if (cart.length === 0) return;
-    if (dbStatus !== 'CONECTADO') return showAlert("Conexión perdida. No se puede grabar la venta.", "error");
+    if (dbStatus !== 'CONECTADO') return showAlert("Conexión perdida.", "error");
 
-    setIsProcessing(true); // INICIA ANIMACIÓN DE CARGA
-
+    setIsProcessing(true);
     const total = cart.reduce((sum, item) => sum + item.subtotal, 0);
     const { date, time } = getTimestamp();
-    const timestampInternal = Date.now();
-    
     const ticketNumber = (sales.length + 1).toString().padStart(7, '0');
     const saleId = `T-${ticketNumber}`;
-    
-    const newSale = { 
-        id: saleId, timestamp: timestampInternal, date, time, seller: currentUser.name, shiftId: cashSession.shiftId, items: cart, total, status: 'COMPLETADA' 
-    };
+    const timestampInternal = Date.now();
+
+    const newSale = { id: saleId, timestamp: timestampInternal, date, time, seller: currentUser.name, shiftId: cashSession.shiftId, items: cart, total, status: 'COMPLETADA' };
 
     try {
         await setDoc(doc(db, 'sales', saleId), newSale);
-
         for (const cartItem of cart) {
             const product = products.find(p => p.id === cartItem.productId);
             if (product) {
                 await setDoc(doc(db, 'products', product.id), { ...product, stock: product.stock - cartItem.qty });
             }
         }
-
-        addAuditLog("VENTA COBRADA", `Ticket ${saleId} cobrado por S/ ${total.toFixed(2)}`);
-        
+        addAuditLog("VENTA COBRADA", `Ticket ${saleId} por S/ ${total.toFixed(2)}`);
         setCart([]);
-        // Abre el modal ofreciendo las opciones de imprimir o seguir
-        setSuccessCheckoutModal({ isOpen: true, saleData: newSale });
-
+        setIsProcessing(false);
+        setSuccessModal({ isOpen: true, sale: newSale }); // Abre modal post-venta
     } catch (e) {
-        console.error(e);
-        showAlert("Error crítico guardando venta.", "error");
-    } finally {
-        setIsProcessing(false); // DETIENE ANIMACIÓN DE CARGA
+        setIsProcessing(false);
+        showAlert("Error crítico.", "error");
     }
   };
 
-  // --- ANULACIÓN LÓGICA DE TICKET (ACCESIBLE POR CAJERO + PIN DE ADMIN) ---
   const requestVoid = (saleId) => setAuthModal({ isOpen: true, action: 'VOID_SALE', payload: saleId, error: '' });
 
   const executeVoid = async (saleId, reason) => {
@@ -456,19 +371,15 @@ export default function App() {
     if (!sale) return;
 
     if (dbStatus === 'CONECTADO') {
-        // 1. Marcar el ticket como ANULADA
         await setDoc(doc(db, 'sales', saleId), { ...sale, status: 'ANULADA', voidReason: reason, voidBy: currentUser.name });
-        
-        // 2. Devolver el stock a los productos
         for (const cartItem of sale.items) {
              const product = products.find(p => p.id === cartItem.productId);
              if(product) {
                  await setDoc(doc(db, 'products', product.id), { ...product, stock: product.stock + cartItem.qty });
              }
         }
-        
-        addAuditLog("ANULACIÓN", `Ticket ${saleId} anulado por devolucion. Cajero: ${currentUser.name}. Motivo: ${reason}`);
-        showAlert(`Ticket ${saleId} anulado. Dinero restado y stock devuelto.`, 'success');
+        addAuditLog("ANULACIÓN", `Ticket ${saleId} anulado. Motivo: ${reason}`);
+        showAlert(`Venta ${saleId} anulada y stock devuelto.`, 'success');
     }
   };
 
@@ -476,45 +387,138 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.target);
     if (formData.get('pin') !== '1234') {
-        addAuditLog("ALERTA SEGURIDAD", `PIN incorrecto ingresado intentando anular venta.`);
-        return setAuthModal(prev => ({ ...prev, error: 'PIN INCORRECTO. Operación bloqueada.' }));
+        addAuditLog("ALERTA SEGURIDAD", "PIN incorrecto para anulación.");
+        return setAuthModal(prev => ({ ...prev, error: 'PIN INCORRECTO.' }));
     }
     if (authModal.action === 'VOID_SALE') executeVoid(authModal.payload, formData.get('reason'));
     setAuthModal({ isOpen: false, action: null, payload: null, error: '' });
   };
 
+  // --- MÓDULOS DE ADMINISTRADOR (NUEVOS BOTONES EDITAR Y ELIMINAR) ---
+  const handleAddStaff = async (e) => {
+    e.preventDefault();
+    if (!newStaffForm.name.trim()) return showAlert('Ingrese el nombre del cajero.', 'error');
+    const newId = `CAJ-${Date.now().toString().slice(-4)}`;
+    const newEmployee = { id: newId, name: newStaffForm.name.trim(), role: 'CAJERO', joined: getTimestamp().date };
+    if (dbStatus === 'CONECTADO') {
+        await setDoc(doc(db, 'staff', newId), newEmployee);
+        addAuditLog("NUEVO CAJERO", `Cajero registrado: ${newEmployee.name}`);
+        showAlert('Cajero registrado.', 'success');
+        setNewStaffForm({ name: '' });
+    }
+  };
 
-  // --- MÉTRICAS ADMIN ---
+  const handleDeleteStaff = async (staffId) => {
+      if(staffId === 'CAJ-001') return showAlert('No puede eliminar al administrador.', 'error');
+      if (dbStatus === 'CONECTADO') {
+          await deleteDoc(doc(db, 'staff', staffId));
+          addAuditLog("ELIMINA CAJERO", `Personal retirado: ID ${staffId}`);
+          showAlert('Cajero eliminado.', 'info');
+      }
+  };
+
+  const handleAddProduct = async (e) => {
+    e.preventDefault();
+    if (!newProductForm.name || !newProductForm.category || !newProductForm.price) return showAlert('Llene todos los campos.', 'error');
+    const newId = `P${Date.now().toString().slice(-5)}`;
+    const newProd = { id: newId, name: newProductForm.name, category: newProductForm.category, price: parseFloat(newProductForm.price), stock: 0, lots: [] };
+    if (dbStatus === 'CONECTADO') {
+        await setDoc(doc(db, 'products', newId), newProd);
+        addAuditLog("NUEVO PRODUCTO", `Producto creado: ${newProd.name}`);
+        showAlert('Producto añadido al catálogo.', 'success');
+        setNewProductForm({ name: '', category: '', price: '' });
+    }
+  };
+
+  const handleDeleteProduct = async (id, name) => {
+      if(!window.confirm(`¿Seguro que desea ELIMINAR el producto ${name} por completo de la base de datos?`)) return;
+      if(dbStatus === 'CONECTADO') {
+          await deleteDoc(doc(db, 'products', id));
+          addAuditLog("ELIMINA PRODUCTO", `Se eliminó el producto del catálogo: ${name}`);
+          showAlert('Producto eliminado.', 'info');
+      }
+  };
+
+  const handleUpdateProduct = async (e) => {
+      e.preventDefault();
+      if(dbStatus === 'CONECTADO') {
+          const currentProd = products.find(p => p.id === editProdModal.id);
+          await setDoc(doc(db, 'products', editProdModal.id), { ...currentProd, name: editProdModal.name, category: editProdModal.category, price: parseFloat(editProdModal.price) });
+          addAuditLog("EDITA PRODUCTO", `Catálogo editado: ${editProdModal.name}`);
+          showAlert('Producto actualizado.', 'success');
+          setEditProdModal({ isOpen: false, id: '', name: '', category: '', price: '' });
+      }
+  };
+
+  const handleInvoiceSubmit = async (e) => {
+    e.preventDefault();
+    const { supplier, document: docNum, productId, qty, lote, expDate, totalCost } = invoiceForm;
+    const numQty = parseInt(qty);
+    if(!supplier || !docNum || !productId || isNaN(numQty) || !lote || !expDate) return showAlert("Llene todos los campos.", "error");
+
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    const newLot = { id: `L-${Date.now()}`, lote: lote.trim().toUpperCase(), exp: expDate, qty: numQty };
+    const updatedLots = [...product.lots, newLot];
+    const invId = `INV-${Date.now()}`;
+    const newInvoice = { id: invId, date: getTimestamp().date, supplier, document: docNum, product: product.name, productId: product.id, qty: numQty, cost: parseFloat(totalCost || 0), user: currentUser.name };
+
+    if (dbStatus === 'CONECTADO') {
+        await setDoc(doc(db, 'products', product.id), { ...product, stock: product.stock + numQty, lots: updatedLots });
+        await setDoc(doc(db, 'invoices', invId), newInvoice);
+        addAuditLog("RECEPCIÓN MERCADERÍA", `Factura ${docNum}: +${numQty} units`);
+        showAlert("Compra registrada e inventario actualizado.", "success");
+        setInvoiceForm({ supplier: '', document: '', productId: '', qty: '', lote: '', expDate: '', totalCost: '' });
+    }
+  };
+
+  const handleDeleteInvoice = async (inv) => {
+      if(!window.confirm(`¿Seguro que desea ELIMINAR la factura ${inv.document}? Se restarán ${inv.qty} unidades del stock de ${inv.product}.`)) return;
+      if (dbStatus === 'CONECTADO') {
+          await deleteDoc(doc(db, 'invoices', inv.id));
+          const product = products.find(p => p.id === inv.productId || p.name === inv.product);
+          if (product) {
+              await setDoc(doc(db, 'products', product.id), { ...product, stock: Math.max(0, product.stock - inv.qty) });
+          }
+          addAuditLog("ELIMINA FACTURA", `Factura eliminada: ${inv.document}. Stock descontado.`);
+          showAlert('Factura eliminada y stock revertido.', 'info');
+      }
+  };
+
+  const handleUpdateInvoice = async (e) => {
+      e.preventDefault();
+      if(dbStatus === 'CONECTADO') {
+          const currentInv = invoices.find(i => i.id === editInvModal.id);
+          await setDoc(doc(db, 'invoices', editInvModal.id), { ...currentInv, supplier: editInvModal.supplier, document: editInvModal.document, cost: parseFloat(editInvModal.totalCost) });
+          addAuditLog("EDITA FACTURA", `Factura actualizada: ${editInvModal.document}`);
+          showAlert('Factura actualizada.', 'success');
+          setEditInvModal({ isOpen: false, id: '', supplier: '', document: '', totalCost: '' });
+      }
+  };
+
   const getDashboardMetrics = () => {
       const todaySales = sales.filter(s => s.status === 'COMPLETADA');
       const dailyRevenue = todaySales.reduce((acc, s) => acc + s.total, 0);
       const totalInvestment = invoices.reduce((acc, inv) => acc + inv.cost, 0);
       const netProfit = dailyRevenue - totalInvestment;
       const totalAnulaciones = sales.filter(s => s.status === 'ANULADA').reduce((acc, s) => acc + s.total, 0);
-      
-      const catSales = {};
-      todaySales.forEach(sale => {
-          sale.items.forEach(item => { catSales[item.category] = (catSales[item.category] || 0) + item.subtotal; });
-      });
-      const sortedCategories = Object.entries(catSales).sort((a, b) => b[1] - a[1]);
-
-      return { dailyRevenue, totalInvestment, netProfit, totalAnulaciones, ticketsCount: todaySales.length, sortedCategories };
+      return { dailyRevenue, totalInvestment, netProfit, totalAnulaciones, ticketsCount: todaySales.length };
   };
 
   const metrics = getDashboardMetrics();
   const displayedProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // Render
+  // Render principal
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 flex flex-col">
       
-      {/* HEADER */}
+      {/* HEADER PRINCIPAL */}
       <header className="bg-slate-900 border-b border-slate-700 text-white shadow-lg sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
           
           <div className="flex items-center gap-4">
             <div className="bg-white/10 p-2 rounded-lg flex items-center justify-center">
-              <img src="https://i.imgur.com/rMiaZmc.png" alt="Logo" className="h-10 w-auto object-contain drop-shadow-md" />
+              <img src="https://i.imgur.com/rMiaZmc.png" alt="Logo Farma Salud" className="h-10 w-auto object-contain drop-shadow-md" />
             </div>
             <div className="hidden sm:flex flex-col gap-1">
                 <span className="text-[10px] font-bold bg-blue-900/50 text-blue-200 px-2 py-0.5 rounded border border-blue-700/50 tracking-wider uppercase w-max">
@@ -538,7 +542,7 @@ export default function App() {
                   {currentUser.role}
                 </span>
               </div>
-              <button onClick={handleLogout} className="bg-slate-800 p-2 rounded-lg hover:bg-red-900 text-white transition-all">
+              <button onClick={handleLogout} className="bg-slate-800 p-2 rounded-lg hover:bg-red-900 text-white transition-all shadow-sm">
                 <LogOut size={18} />
               </button>
             </div>
@@ -546,10 +550,10 @@ export default function App() {
         </div>
       </header>
 
-      {/* ALERTAS */}
-      <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      {/* ALERTAS GLOBALES */}
+      <div className="fixed top-20 right-4 z-50 flex flex-col gap-2">
         {alerts.map(a => (
-          <div key={a.id} className={`p-4 rounded-xl shadow-2xl border-l-4 font-bold text-sm max-w-sm flex items-center gap-3 animate-in slide-in-from-right-8 pointer-events-auto ${
+          <div key={a.id} className={`p-4 rounded-xl shadow-2xl border-l-4 font-bold text-sm max-w-sm flex items-center gap-3 animate-in slide-in-from-right-8 ${
             a.type === 'error' ? 'bg-white border-red-500 text-red-700' : 'bg-slate-900 border-emerald-500 text-emerald-400'
           }`}>
             {a.type === 'error' ? <AlertTriangle size={20}/> : <CheckCircle size={20}/>}
@@ -560,7 +564,7 @@ export default function App() {
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 flex flex-col gap-4">
         
-        {/* LOGIN VIEW */}
+        {/* === VISTA: LOGIN === */}
         {!currentUser && activeTab === 'LOGIN' && (
           <div className="flex-1 flex items-center justify-center p-4">
             <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full relative overflow-hidden">
@@ -577,20 +581,20 @@ export default function App() {
           </div>
         )}
 
-        {/* NAVEGACIÓN PRINCIPAL */}
+        {/* --- NAVEGACIÓN DE MÓDULOS --- */}
         {currentUser && activeTab !== 'OPEN_CASH' && activeTab !== 'LOGIN' && (
           <nav className="bg-white shadow-sm border border-slate-200 rounded-xl p-1.5 flex flex-wrap gap-1">
             {currentUser.role === 'CAJERO' ? (
               <>
-                <button onClick={() => setActiveTab('POS')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'POS' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><ShoppingCart size={14} /> PUNTO DE VENTA</button>
-                <button onClick={() => setActiveTab('HISTORY')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'HISTORY' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Clock size={14} /> HISTORIAL DE CAJA</button>
-                <button onClick={() => setActiveTab('CASH')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'CASH' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Activity size={14} /> CIERRE DE CAJA</button>
+                <button onClick={() => setActiveTab('POS')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'POS' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}><ShoppingCart size={14} /> PUNTO DE VENTA</button>
+                <button onClick={() => setActiveTab('HISTORY')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'HISTORY' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}><Clock size={14} /> HISTORIAL</button>
+                <button onClick={() => setActiveTab('CASH')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'CASH' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}><Activity size={14} /> CIERRE DE CAJA</button>
               </>
             ) : (
               <>
                 <button onClick={() => setActiveTab('DASHBOARD')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'DASHBOARD' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><TrendingUp size={14} /> DASHBOARD</button>
-                <button onClick={() => setActiveTab('ADMIN_PROD')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'ADMIN_PROD' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Box size={14} /> CATÁLOGO & PRECIOS</button>
-                <button onClick={() => setActiveTab('INVOICES')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'INVOICES' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Truck size={14} /> COMPRAS</button>
+                <button onClick={() => setActiveTab('ADMIN_PROD')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'ADMIN_PROD' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Box size={14} /> CATÁLOGO Y PRECIOS</button>
+                <button onClick={() => setActiveTab('INVOICES')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'INVOICES' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Truck size={14} /> COMPRAS Y FACTURAS</button>
                 <button onClick={() => setActiveTab('EXPIRIES')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'EXPIRIES' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><AlertTriangle size={14} /> VENCIMIENTOS</button>
                 <button onClick={() => setActiveTab('USERS')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'USERS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Users size={14} /> PERSONAL</button>
                 <button onClick={() => setActiveTab('AUDIT')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'AUDIT' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><ShieldAlert size={14} /> AUDITORÍA</button>
@@ -607,7 +611,7 @@ export default function App() {
            <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 border-t-4 border-t-emerald-500 max-w-md w-full">
              <div className="text-center mb-6">
                <h2 className="text-xl font-black text-slate-800">Apertura de Turno</h2>
-               <p className="text-xs text-slate-500 mt-2">Hola <b>{currentUser?.name}</b>, declare el efectivo inicial de su gaveta.</p>
+               <p className="text-xs text-slate-500 mt-2">Hola <b>{currentUser?.name}</b>, declare el efectivo inicial de su gaveta para iniciar ventas.</p>
              </div>
              <form onSubmit={handleOpenCashRegister} className="space-y-6">
                <div>
@@ -622,7 +626,7 @@ export default function App() {
          </div>
         )}
 
-        {/* PUNTO DE VENTA (DISEÑO CUADRADITO Y CON SOMBRAS) */}
+        {/* PUNTO DE VENTA */}
         {activeTab === 'POS' && (
           <div className="flex flex-col lg:flex-row gap-4 h-[75vh]">
             <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
@@ -679,8 +683,6 @@ export default function App() {
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total a Pagar</span>
                   <span className="text-4xl font-black text-slate-900">S/ {cart.reduce((s, i) => s + i.subtotal, 0).toFixed(2)}</span>
                 </div>
-                
-                {/* BOTÓN CON ANIMACIÓN DE CARGA */}
                 <button 
                   onClick={processCheckout} 
                   disabled={cart.length === 0 || isProcessing} 
@@ -694,29 +696,25 @@ export default function App() {
                       </svg>
                       PROCESANDO...
                     </>
-                  ) : (
-                    'COBRAR TICKET'
-                  )}
+                  ) : 'COBRAR TICKET'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* HISTORIAL (AHORA EL CAJERO TAMBIÉN PUEDE SOLICITAR ANULAR TICKET AQUÍ) */}
+        {/* HISTORIAL (BOTONES PDF Y PRINT HABILITADOS, ORDEN CRONOLÓGICO) */}
         {activeTab === 'HISTORY' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
              <div className="flex justify-between items-center border-b pb-4 mb-4">
-                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Clock /> Historial de Turno</h3>
-                <div className="flex items-center gap-2">
-                    <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">Sincronizado en Nube</span>
-                </div>
+                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Clock /> Historial Permanente de Ventas</h3>
+                <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">Sincronizado en Nube</span>
              </div>
              <div className="overflow-x-auto flex-1">
                  <table className="w-full text-left text-sm">
                      <thead className="bg-slate-50 uppercase text-[10px] text-slate-500 tracking-widest">
                          <tr>
-                             <th className="p-4">Comprobante</th><th className="p-4">Fecha / Hora</th><th className="p-4">Cajero</th><th className="p-4 text-right">Monto Total</th><th className="p-4 text-center">Estado</th><th className="p-4 text-center">Acciones y Opciones</th>
+                             <th className="p-4">Comprobante</th><th className="p-4">Fecha / Hora</th><th className="p-4">Cajero</th><th className="p-4 text-right">Monto Total</th><th className="p-4 text-center">Estado</th><th className="p-4 text-center">Acciones</th>
                          </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-100">
@@ -738,9 +736,8 @@ export default function App() {
                                     <div className="flex justify-center gap-2">
                                         <button onClick={() => handlePrintReal(s)} className="p-2 bg-white border border-slate-200 shadow-sm text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Imprimir Ticket Térmico"><Printer size={16}/></button>
                                         <button onClick={() => handleDownloadPDF(s)} className="p-2 bg-white border border-slate-200 shadow-sm text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Descargar como PDF"><Download size={16}/></button>
-                                        {/* ESTE ES EL BOTÓN QUE EL CAJERO Y EL ADMIN PUEDEN VER PARA ANULAR UNA VENTA */}
                                         {s.status === 'COMPLETADA' && (
-                                            <button onClick={() => requestVoid(s.id)} className="p-2 bg-white border border-red-200 shadow-sm text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1 font-bold text-[10px]" title="Anular y Devolver Dinero"><XCircle size={14}/> Anular</button>
+                                            <button onClick={() => requestVoid(s.id)} className="p-2 bg-white border border-red-200 shadow-sm text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors" title="Anular Venta"><XCircle size={16}/></button>
                                         )}
                                     </div>
                                  </td>
@@ -812,7 +809,7 @@ export default function App() {
             </div>
         )}
 
-        {/* CATÁLOGO Y PRECIOS ADMIN */}
+        {/* CATÁLOGO Y PRECIOS ADMIN (EDITAR Y ELIMINAR AÑADIDO) */}
         {activeTab === 'ADMIN_PROD' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-fit">
@@ -843,14 +840,21 @@ export default function App() {
                     <div className="overflow-x-auto flex-1">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 uppercase text-[10px] text-slate-500 sticky top-0">
-                                <tr><th className="p-4">Cód</th><th className="p-4">Producto</th><th className="p-4 text-center">Stock</th><th className="p-4 text-right">Precio</th></tr>
+                                <tr><th className="p-4">Cód</th><th className="p-4">Producto</th><th className="p-4 text-center">Stock</th><th className="p-4 text-right">Precio</th><th className="p-4 text-center">Acciones</th></tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
+                                {displayedProducts.length === 0 && <tr><td colSpan="5" className="text-center py-10 text-slate-400">Catálogo vacío. Agregue productos.</td></tr>}
                                 {displayedProducts.map(p => (
                                     <tr key={p.id} className="hover:bg-slate-50">
                                         <td className="p-4 text-xs font-mono text-slate-400">{p.id}</td><td className="p-4 font-bold text-slate-700">{p.name} <div className="text-[9px] text-slate-400">{p.category}</div></td>
                                         <td className="p-4 text-center"><span className={`px-2 py-1 rounded text-xs font-black ${p.stock <= 5 ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>{p.stock}</span></td>
                                         <td className="p-4 text-right font-black text-emerald-600">{formatCurrency(p.price)}</td>
+                                        <td className="p-4 text-center">
+                                            <div className="flex justify-center gap-2">
+                                                <button onClick={() => setEditProdModal({isOpen: true, id: p.id, name: p.name, category: p.category, price: p.price})} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded" title="Editar Producto"><Edit3 size={14}/></button>
+                                                <button onClick={() => handleDeleteProduct(p.id, p.name)} className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded" title="Eliminar Producto"><XCircle size={14}/></button>
+                                            </div>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -860,7 +864,7 @@ export default function App() {
             </div>
         )}
 
-        {/* FACTURAS Y COMPRAS ADMIN */}
+        {/* FACTURAS Y COMPRAS ADMIN (EDITAR Y ELIMINAR AÑADIDO) */}
         {activeTab === 'INVOICES' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-fit">
@@ -889,10 +893,10 @@ export default function App() {
                     <div className="overflow-x-auto flex-1">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 uppercase text-[10px] text-slate-500 sticky top-0">
-                                <tr><th className="p-4">Doc</th><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Detalle</th><th className="p-4 text-right">Inversión</th></tr>
+                                <tr><th className="p-4">Doc</th><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Detalle</th><th className="p-4 text-right">Inversión</th><th className="p-4 text-center">Acciones</th></tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {invoices.length === 0 && <tr><td colSpan="5" className="text-center py-10 text-slate-400">No hay compras registradas en la base de datos.</td></tr>}
+                                {invoices.length === 0 && <tr><td colSpan="6" className="text-center py-10 text-slate-400">No hay compras registradas en la base de datos.</td></tr>}
                                 {invoices.map(inv => (
                                     <tr key={inv.id} className="hover:bg-slate-50">
                                         <td className="p-4 font-mono text-xs text-slate-500">{inv.document}</td>
@@ -900,6 +904,12 @@ export default function App() {
                                         <td className="p-4 font-bold text-slate-700">{inv.supplier}</td>
                                         <td className="p-4 text-xs font-semibold text-emerald-600">+{inv.qty} und. <span className="text-slate-600">{inv.product}</span></td>
                                         <td className="p-4 text-right font-black text-amber-600">S/ {inv.cost.toFixed(2)}</td>
+                                        <td className="p-4 text-center">
+                                            <div className="flex justify-center gap-2">
+                                                <button onClick={() => setEditInvModal({isOpen: true, id: inv.id, supplier: inv.supplier, document: inv.document, totalCost: inv.cost})} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded" title="Editar Factura"><Edit3 size={14}/></button>
+                                                <button onClick={() => handleDeleteInvoice(inv)} className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded" title="Eliminar y Revertir Stock"><XCircle size={14}/></button>
+                                            </div>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -909,7 +919,7 @@ export default function App() {
             </div>
         )}
 
-        {/* VENCIMIENTOS ADMIN */}
+        {/* VENCIMIENTOS ADMIN (FILTRO INTELIGENTE AÑADIDO) */}
         {activeTab === 'EXPIRIES' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 h-[75vh] flex flex-col">
                 <h3 className="font-black text-slate-800 mb-4 border-b pb-4">Control Analítico de Vencimientos</h3>
@@ -919,7 +929,8 @@ export default function App() {
                             <tr><th className="p-4">Producto</th><th className="p-4">N° de Lote</th><th className="p-4 text-center">Unidades en Riesgo</th><th className="p-4 text-right">Fecha de Caducidad</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {products.flatMap(p => p.lots.map(l => ({ ...l, prodName: p.name }))).sort((a,b) => new Date(a.exp) - new Date(b.exp)).map((lot, idx) => {
+                            {/* AQUÍ ESTÁ EL FILTRO INTELIGENTE: Solo muestra si el stock > 0 */}
+                            {products.filter(p => p.stock > 0).flatMap(p => p.lots.map(l => ({ ...l, prodName: p.name }))).sort((a,b) => new Date(a.exp) - new Date(b.exp)).map((lot, idx) => {
                                 const expDate = new Date(lot.exp);
                                 const isNear = (expDate - new Date()) / (1000 * 60 * 60 * 24) <= 90; // Menos de 3 meses
                                 return (
@@ -993,16 +1004,16 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full border-t-4 border-t-red-500 p-6">
             <h3 className="text-lg font-black text-slate-900 flex items-center gap-2 mb-2"><ShieldAlert className="text-red-500"/> Autorización Requerida</h3>
-            <p className="text-xs text-slate-500 mb-4">Ingrese la clave de administrador y el motivo para proceder con la anulación o devolución del ticket {authModal.payload}.</p>
+            <p className="text-xs text-slate-500 mb-4">Ingrese la clave de administrador y el motivo para proceder con la anulación.</p>
             
             <form onSubmit={handlePinSubmit} className="space-y-4">
               {authModal.error && <div className="bg-red-50 text-red-600 text-[10px] p-2 rounded font-bold text-center border border-red-200">{authModal.error}</div>}
               <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Motivo de la Devolución/Anulación</label>
-                  <input name="reason" type="text" required placeholder="Ej. Cliente devolvió el producto" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-red-500 mt-1" autoFocus />
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Motivo Obligatorio</label>
+                  <input name="reason" type="text" required placeholder="Ej. Error en producto" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-red-500 mt-1" autoFocus />
               </div>
               <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PIN de Autorización (Dueña/Admin)</label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">PIN Administrativo</label>
                   <input name="pin" type="password" required placeholder="••••" maxLength="4" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xl text-center tracking-widest font-black outline-none focus:border-red-500 mt-1" />
               </div>
               <div className="flex gap-2 pt-2">
@@ -1015,20 +1026,20 @@ export default function App() {
       )}
 
       {/* MODAL: POST-VENTA (IMPRIMIR O SEGUIR) */}
-      {successCheckoutModal.isOpen && successCheckoutModal.saleData && (
+      {successModal.isOpen && successModal.sale && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full border-t-4 border-t-emerald-500 p-6 text-center animate-in zoom-in duration-200">
             <div className="mx-auto w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
                 <CheckCircle size={32} />
             </div>
             <h3 className="text-xl font-black text-slate-900 mb-1">¡Venta Exitosa!</h3>
-            <p className="text-sm text-slate-500 mb-6">El ticket <span className="font-bold text-slate-800">{successCheckoutModal.saleData.id}</span> ha sido guardado correctamente.</p>
+            <p className="text-sm text-slate-500 mb-6">El ticket <span className="font-bold text-slate-800">{successModal.sale.id}</span> ha sido guardado correctamente.</p>
             
             <div className="space-y-3">
                 <button 
                     onClick={() => {
-                        handlePrintReal(successCheckoutModal.saleData);
-                        setSuccessCheckoutModal({ isOpen: false, saleData: null });
+                        handlePrintReal(successModal.sale);
+                        setSuccessModal({ isOpen: false, sale: null });
                     }} 
                     className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-lg">
                     <Printer size={24} />
@@ -1036,7 +1047,7 @@ export default function App() {
                 </button>
                 
                 <button 
-                    onClick={() => setSuccessCheckoutModal({ isOpen: false, saleData: null })} 
+                    onClick={() => setSuccessModal({ isOpen: false, sale: null })} 
                     className="w-full py-4 bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold rounded-xl transition-all">
                     Siguiente Venta
                 </button>
@@ -1045,6 +1056,64 @@ export default function App() {
         </div>
       )}
 
+      {/* MODAL: EDITAR PRODUCTO */}
+      {editProdModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl border-t-4 border-blue-500">
+            <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Edit3 className="text-blue-500"/> Editar Producto</h3>
+            <form onSubmit={handleUpdateProduct} className="space-y-3">
+                <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Nombre</label>
+                    <input type="text" required value={editProdModal.name} onChange={e=>setEditProdModal({...editProdModal, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Categoría</label>
+                    <select required value={editProdModal.category} onChange={e=>setEditProdModal({...editProdModal, category: e.target.value})} className="w-full border p-2 rounded-lg text-sm">
+                        <option value="Analgésicos">Analgésicos</option><option value="Antibióticos">Antibióticos</option><option value="Antiinflamatorios">Antiinflamatorios</option><option value="Insumos">Insumos</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Precio (S/)</label>
+                    <input type="number" step="0.10" required value={editProdModal.price} onChange={e=>setEditProdModal({...editProdModal, price: e.target.value})} className="w-full border p-2 rounded-lg text-sm font-bold" />
+                </div>
+                <div className="flex gap-2 pt-2">
+                    <button type="button" onClick={()=>setEditProdModal({isOpen: false, id: '', name: '', category: '', price: ''})} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors text-sm">CANCELAR</button>
+                    <button type="submit" className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-md text-sm transition-colors">ACTUALIZAR</button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDITAR FACTURA */}
+      {editInvModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl border-t-4 border-blue-500">
+            <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Edit3 className="text-blue-500"/> Editar Compra</h3>
+            <div className="bg-amber-50 text-amber-800 text-[10px] p-2 rounded font-bold mb-3 border border-amber-200">Solo puede editar datos de facturación. Si desea modificar productos o stock, elimine la factura y vuélvala a registrar.</div>
+            <form onSubmit={handleUpdateInvoice} className="space-y-3">
+                <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Proveedor</label>
+                    <input type="text" required value={editInvModal.supplier} onChange={e=>setEditInvModal({...editInvModal, supplier: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">N° Documento</label>
+                    <input type="text" required value={editInvModal.document} onChange={e=>setEditInvModal({...editInvModal, document: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Inversión (S/)</label>
+                    <input type="number" step="0.10" required value={editInvModal.totalCost} onChange={e=>setEditInvModal({...editInvModal, totalCost: e.target.value})} className="w-full border p-2 rounded-lg text-sm font-bold" />
+                </div>
+                <div className="flex gap-2 pt-2">
+                    <button type="button" onClick={()=>setEditInvModal({isOpen: false, id: '', supplier: '', document: '', totalCost: ''})} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors text-sm">CANCELAR</button>
+                    <button type="submit" className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-md text-sm transition-colors">ACTUALIZAR</button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* LOGIN CAJERO */}
       {cashierLoginModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl border-t-4 border-emerald-500">
@@ -1062,6 +1131,7 @@ export default function App() {
         </div>
       )}
 
+      {/* LOGIN ADMIN */}
       {adminLoginModal && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl border-t-4 border-blue-500">
