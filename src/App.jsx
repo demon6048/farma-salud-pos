@@ -61,10 +61,11 @@ export default function App() {
   const [adminLoginModal, setAdminLoginModal] = useState(false);
   const [cashierLoginModal, setCashierLoginModal] = useState(false);
   const [authModal, setAuthModal] = useState({ isOpen: false, action: null, payload: null, error: '' });
-  const [successCheckoutModal, setSuccessCheckoutModal] = useState({ isOpen: false, saleData: null }); // NUEVO ESTADO PARA EL MODAL POST-VENTA
+  const [successCheckoutModal, setSuccessCheckoutModal] = useState({ isOpen: false, saleData: null });
   const [alerts, setAlerts] = useState([]);
   const [openingAmount, setOpeningAmount] = useState(''); 
   const [closingAmount, setClosingAmount] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false); // Estado para la animación de carga del botón
   
   const [newStaffForm, setNewStaffForm] = useState({ name: '' });
   const [newProductForm, setNewProductForm] = useState({ name: '', category: '', price: '' });
@@ -410,6 +411,8 @@ export default function App() {
     if (cart.length === 0) return;
     if (dbStatus !== 'CONECTADO') return showAlert("Conexión perdida. No se puede grabar la venta.", "error");
 
+    setIsProcessing(true); // INICIA ANIMACIÓN DE CARGA
+
     const total = cart.reduce((sum, item) => sum + item.subtotal, 0);
     const { date, time } = getTimestamp();
     const timestampInternal = Date.now();
@@ -433,13 +436,15 @@ export default function App() {
 
         addAuditLog("VENTA COBRADA", `Ticket ${saleId} cobrado por S/ ${total.toFixed(2)}`);
         
-        // Limpiamos el carrito, pero abrimos el modal de éxito pasando los datos de la venta recién hecha
         setCart([]);
+        // Abre el modal ofreciendo las opciones de imprimir o seguir
         setSuccessCheckoutModal({ isOpen: true, saleData: newSale });
 
     } catch (e) {
         console.error(e);
         showAlert("Error crítico guardando venta.", "error");
+    } finally {
+        setIsProcessing(false); // DETIENE ANIMACIÓN DE CARGA
     }
   };
 
@@ -451,7 +456,7 @@ export default function App() {
     if (!sale) return;
 
     if (dbStatus === 'CONECTADO') {
-        // 1. Marcar el ticket como ANULADA (no se borra por auditoría, se anula y resta dinero)
+        // 1. Marcar el ticket como ANULADA
         await setDoc(doc(db, 'sales', saleId), { ...sale, status: 'ANULADA', voidReason: reason, voidBy: currentUser.name });
         
         // 2. Devolver el stock a los productos
@@ -470,7 +475,6 @@ export default function App() {
   const handlePinSubmit = (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    // Para anular una venta (devolver dinero), el cajero DEBE pedirle la clave a la dueña/admin
     if (formData.get('pin') !== '1234') {
         addAuditLog("ALERTA SEGURIDAD", `PIN incorrecto ingresado intentando anular venta.`);
         return setAuthModal(prev => ({ ...prev, error: 'PIN INCORRECTO. Operación bloqueada.' }));
@@ -675,7 +679,25 @@ export default function App() {
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total a Pagar</span>
                   <span className="text-4xl font-black text-slate-900">S/ {cart.reduce((s, i) => s + i.subtotal, 0).toFixed(2)}</span>
                 </div>
-                <button onClick={processCheckout} disabled={cart.length === 0} className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black rounded-xl text-lg shadow-md transition-all">COBRAR TICKET</button>
+                
+                {/* BOTÓN CON ANIMACIÓN DE CARGA */}
+                <button 
+                  onClick={processCheckout} 
+                  disabled={cart.length === 0 || isProcessing} 
+                  className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black rounded-xl text-lg shadow-md transition-all flex justify-center items-center gap-2"
+                >
+                  {isProcessing ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      PROCESANDO...
+                    </>
+                  ) : (
+                    'COBRAR TICKET'
+                  )}
+                </button>
               </div>
             </div>
           </div>
