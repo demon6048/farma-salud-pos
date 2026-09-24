@@ -61,6 +61,7 @@ export default function App() {
   const [adminLoginModal, setAdminLoginModal] = useState(false);
   const [cashierLoginModal, setCashierLoginModal] = useState(false);
   const [authModal, setAuthModal] = useState({ isOpen: false, action: null, payload: null, error: '' });
+  const [successCheckoutModal, setSuccessCheckoutModal] = useState({ isOpen: false, saleData: null }); // NUEVO ESTADO PARA EL MODAL POST-VENTA
   const [alerts, setAlerts] = useState([]);
   const [openingAmount, setOpeningAmount] = useState(''); 
   const [closingAmount, setClosingAmount] = useState('');
@@ -166,15 +167,18 @@ export default function App() {
 
   // --- IMPRESIÓN Y PDF ---
   const generateTicketHTML = (sale) => {
+      // Diseño optimizado para impresoras térmicas pequeñas (aprox 58mm/80mm)
       return `
           <html>
               <head>
                   <title>Ticket ${sale.id}</title>
                   <style>
-                      body { font-family: 'Courier New', Courier, monospace; font-size: 12px; width: 300px; margin: 0 auto; padding: 20px; color: #000; }
+                      body { font-family: 'Courier New', Courier, monospace; font-size: 12px; width: 300px; margin: 0 auto; padding: 10px; color: #000; }
                       h2, h3 { text-align: center; margin: 5px 0; }
                       .divider { border-bottom: 1px dashed #000; margin: 10px 0; }
                       .item { display: flex; justify-content: space-between; margin-bottom: 5px; }
+                      .item-name { max-width: 65%; word-wrap: break-word; }
+                      .item-price { max-width: 35%; text-align: right; }
                       .total { font-weight: bold; font-size: 14px; text-align: right; margin-top: 10px; }
                       .footer { text-align: center; font-size: 10px; margin-top: 20px; }
                   </style>
@@ -189,13 +193,13 @@ export default function App() {
                   <div class="divider"></div>
                   ${sale.items.map(item => `
                       <div class="item">
-                          <span>${item.qty}x ${item.name}</span>
-                          <span>S/ ${item.subtotal.toFixed(2)}</span>
+                          <span class="item-name">${item.qty}x ${item.name}</span>
+                          <span class="item-price">S/ ${item.subtotal.toFixed(2)}</span>
                       </div>
                   `).join('')}
                   <div class="divider"></div>
                   <div class="total">TOTAL: S/ ${sale.total.toFixed(2)}</div>
-                  <div class="footer">¡Gracias por su compra!<br>Conservar este comprobante.</div>
+                  <div class="footer">¡Gracias por su compra!<br>Conservar este comprobante en caso de devoluciones.</div>
               </body>
           </html>
       `;
@@ -203,7 +207,7 @@ export default function App() {
 
   const handlePrintReal = (sale) => {
       const ticketWindow = window.open('', '_blank', 'width=400,height=600');
-      if(!ticketWindow) return showAlert('El navegador bloqueó la ventana emergente.', 'error');
+      if(!ticketWindow) return showAlert('El navegador bloqueó la ventana emergente. Por favor, permita las ventanas emergentes (pop-ups) para imprimir.', 'error');
       
       ticketWindow.document.write(generateTicketHTML(sale));
       ticketWindow.document.close();
@@ -213,7 +217,7 @@ export default function App() {
           ticketWindow.print();
           ticketWindow.close();
       }, 250);
-      addAuditLog("IMPRESIÓN TICKET", `Se imprimió el ticket ${sale.id}.`);
+      addAuditLog("IMPRESIÓN TICKET", `Se imprimió el ticket térmico ${sale.id}.`);
   };
 
   const handleDownloadPDF = (sale) => {
@@ -428,8 +432,11 @@ export default function App() {
         }
 
         addAuditLog("VENTA COBRADA", `Ticket ${saleId} cobrado por S/ ${total.toFixed(2)}`);
+        
+        // Limpiamos el carrito, pero abrimos el modal de éxito pasando los datos de la venta recién hecha
         setCart([]);
-        showAlert(`Venta ${saleId} cobrada con éxito.`, 'success');
+        setSuccessCheckoutModal({ isOpen: true, saleData: newSale });
+
     } catch (e) {
         console.error(e);
         showAlert("Error crítico guardando venta.", "error");
@@ -981,6 +988,37 @@ export default function App() {
                   <button type="submit" className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-sm shadow-md">AUTORIZAR</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: POST-VENTA (IMPRIMIR O SEGUIR) */}
+      {successCheckoutModal.isOpen && successCheckoutModal.saleData && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full border-t-4 border-t-emerald-500 p-6 text-center animate-in zoom-in duration-200">
+            <div className="mx-auto w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                <CheckCircle size={32} />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 mb-1">¡Venta Exitosa!</h3>
+            <p className="text-sm text-slate-500 mb-6">El ticket <span className="font-bold text-slate-800">{successCheckoutModal.saleData.id}</span> ha sido guardado correctamente.</p>
+            
+            <div className="space-y-3">
+                <button 
+                    onClick={() => {
+                        handlePrintReal(successCheckoutModal.saleData);
+                        setSuccessCheckoutModal({ isOpen: false, saleData: null });
+                    }} 
+                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-lg">
+                    <Printer size={24} />
+                    IMPRIMIR TICKET
+                </button>
+                
+                <button 
+                    onClick={() => setSuccessCheckoutModal({ isOpen: false, saleData: null })} 
+                    className="w-full py-4 bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold rounded-xl transition-all">
+                    Siguiente Venta
+                </button>
+            </div>
           </div>
         </div>
       )}
