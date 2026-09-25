@@ -47,7 +47,7 @@ export default function App() {
   const [sales, setSales] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [invoices, setInvoices] = useState([]);
-  const [topups, setTopups] = useState([]); // Nuevo estado para recargas
+  const [topups, setTopups] = useState([]); 
   
   const [adminLoginModal, setAdminLoginModal] = useState(false);
   const [cashierLoginModal, setCashierLoginModal] = useState(false);
@@ -55,7 +55,6 @@ export default function App() {
   const [successModal, setSuccessModal] = useState({ isOpen: false, sale: null, type: 'SALE' });
   const [alerts, setAlerts] = useState([]);
   
-  // MODALES PERSONALIZADOS (IFRAME SAFE)
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, text: '', onConfirm: null });
   const [promptDialog, setPromptDialog] = useState({ isOpen: false, title: '', value: '', onConfirm: null });
   
@@ -66,8 +65,6 @@ export default function App() {
   const [newStaffForm, setNewStaffForm] = useState({ name: '' });
   const [newProductForm, setNewProductForm] = useState({ name: '', category: '', price: '' });
   const [invoiceForm, setInvoiceForm] = useState({ supplier: '', document: '', productId: '', qty: '', lote: '', expDate: '', totalCost: '' });
-  
-  // Estado para el formulario de recargas
   const [topupForm, setTopupForm] = useState({ phone: '', amount: '', provider: 'Yape' });
   
   const [cart, setCart] = useState([]);
@@ -103,7 +100,6 @@ export default function App() {
             const unsubAudit = onSnapshot(collection(db, 'auditLogs'), (snap) => {
                 setAuditLogs(snap.docs.map(d => d.data()).sort((a,b) => b.logId.localeCompare(a.logId)));
             });
-            // Listener para recargas
             const unsubTopups = onSnapshot(collection(db, 'topups'), (snap) => {
                 setTopups(snap.docs.map(d => d.data()).sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0)));
             });
@@ -260,24 +256,16 @@ export default function App() {
     const declared = parseFloat(closingAmount);
     if (isNaN(declared) || declared < 0) return showAlert("Monto inválido.", "error");
     
-    // Ventas de Farmacia Completadas
     const completedSales = sales.filter(s => s.status === 'COMPLETADA' && s.shiftId === cashSession.shiftId);
     const totalSalesAmount = completedSales.reduce((acc, s) => acc + s.total, 0);
     
-    // Recargas Completadas
     const completedTopups = topups.filter(t => t.status === 'COMPLETADA' && t.shiftId === cashSession.shiftId);
     const totalTopupsAmount = completedTopups.reduce((acc, t) => acc + t.total, 0);
 
     const expected = cashSession.openingAmount + totalSalesAmount + totalTopupsAmount;
     const difference = declared - expected;
     
-    const closedSession = { 
-        ...cashSession, 
-        isOpen: false, 
-        declaredAmount: declared, 
-        result: { expected, difference, totalSalesAmount, totalTopupsAmount } 
-    };
-    
+    const closedSession = { ...cashSession, isOpen: false, declaredAmount: declared, result: { expected, difference, totalSalesAmount, totalTopupsAmount } };
     localStorage.setItem('fs_cash', JSON.stringify(closedSession));
     setCashSession(closedSession);
     addAuditLog("CIERRE CAJA CIEGO", `Declaró S/ ${declared}. Diferencia: S/ ${difference}`);
@@ -319,7 +307,36 @@ export default function App() {
       setCashierLoginModal(false);
   };
 
-  // --- LÓGICA DE RECARGAS DE BILLETERA ---
+  // --- LÓGICA DE GESTIÓN DE PERSONAL (NUEVO) ---
+  const handleAddStaff = async (e) => {
+      e.preventDefault();
+      if (!newStaffForm.name.trim()) return showAlert('Ingrese el nombre del cajero.', 'error');
+      const newId = `CAJ-${Date.now().toString().slice(-4)}`;
+      const newEmployee = { id: newId, name: newStaffForm.name.trim(), role: 'CAJERO', joined: getTimestamp().date };
+
+      if (dbStatus === 'CONECTADO') {
+          await setDoc(doc(db, 'staff', newId), newEmployee);
+          addAuditLog("NUEVO CAJERO", `Cajero registrado: ${newEmployee.name}`);
+          showAlert('Cajero registrado y guardado en la nube.', 'success');
+          setNewStaffForm({ name: '' });
+      }
+  };
+
+  const handleAdminDeleteStaff = (staffId) => {
+      if(staffId === 'CAJ-001') return showAlert('No puede eliminar al administrador principal.', 'error');
+      setConfirmDialog({
+          isOpen: true,
+          text: `¿ESTÁ SEGURO? Eliminar este cajero lo borrará del sistema.`,
+          onConfirm: async () => {
+              if (dbStatus === 'CONECTADO') {
+                  await deleteDoc(doc(db, 'staff', staffId));
+                  addAuditLog("ELIMINA CAJERO", `Personal retirado: ID ${staffId}`);
+                  showAlert('Cajero eliminado del sistema.', 'success');
+              }
+          }
+      });
+  };
+
   const handleTopupSubmit = async (e) => {
       e.preventDefault();
       if (!cashSession.isOpen) return showAlert("Abra la caja primero.", "error");
@@ -331,7 +348,6 @@ export default function App() {
 
       setIsProcessingCheckout(true);
 
-      // Calcular comisión: 1 sol por cada 100
       const fee = Math.ceil(sendAmount / 100); 
       const totalToCollect = sendAmount + fee;
 
@@ -340,18 +356,7 @@ export default function App() {
       const timestampInternal = Date.now();
 
       const newTopup = {
-          id: recId,
-          timestamp: timestampInternal,
-          date,
-          time,
-          seller: currentUser.name,
-          shiftId: cashSession.shiftId,
-          provider: topupForm.provider,
-          phone: topupForm.phone,
-          amount: sendAmount,
-          fee: fee,
-          total: totalToCollect,
-          status: 'COMPLETADA'
+          id: recId, timestamp: timestampInternal, date, time, seller: currentUser.name, shiftId: cashSession.shiftId, provider: topupForm.provider, phone: topupForm.phone, amount: sendAmount, fee: fee, total: totalToCollect, status: 'COMPLETADA'
       };
 
       try {
@@ -380,7 +385,6 @@ export default function App() {
       });
   };
 
-  // --- LÓGICA DE POS DE FARMACIA ---
   const addToCart = (product) => {
     if (!cashSession.isOpen) return showAlert("Abra la caja primero.", "error");
     if (product.stock <= 0) return showAlert("Producto sin stock.", "error");
@@ -538,7 +542,6 @@ export default function App() {
     const product = products.find(p => p.id === productId);
     if (!product) return;
     
-    // El Lote ID único atado a esta factura
     const newLotId = `L-${Date.now()}`;
     const newLot = { id: newLotId, lote: lote.trim().toUpperCase(), exp: expDate, qty: numQty };
     const updatedLots = product.lots ? [...product.lots, newLot] : [newLot];
@@ -609,7 +612,7 @@ export default function App() {
       const totalInvestment = invoices.reduce((acc, inv) => acc + inv.cost, 0);
       
       const todayTopups = topups.filter(t => t.status === 'COMPLETADA');
-      const totalTopupFees = todayTopups.reduce((acc, t) => acc + t.fee, 0); // Solo las comisiones son ganancia
+      const totalTopupFees = todayTopups.reduce((acc, t) => acc + t.fee, 0); 
 
       const netProfit = (dailyRevenue + totalTopupFees) - totalInvestment;
 
@@ -691,7 +694,7 @@ export default function App() {
           </nav>
         )}
 
-        {/* MODAL VENTA O RECARGA EXITOSA */}
+        {/* MODAL VENTA EXITOSA */}
         {successModal.isOpen && (
             <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full border-t-4 border-t-emerald-500 p-8 text-center animate-in zoom-in-95">
@@ -766,7 +769,7 @@ export default function App() {
           </div>
         )}
 
-        {/* --- NUEVO MÓDULO: RECARGAS (TOP-UP) --- */}
+        {/* --- RECARGAS (TOP-UP) --- */}
         {activeTab === 'TOPUP' && (
             <div className="flex items-center justify-center h-[75vh]">
                 <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 border-t-4 border-t-purple-500 max-w-md w-full">
@@ -794,7 +797,6 @@ export default function App() {
                             </div>
                         </div>
 
-                        {/* Visualizador de comisión en vivo */}
                         {topupForm.amount && parseFloat(topupForm.amount) > 0 && (
                             <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
                                 <div className="flex justify-between text-sm mb-1"><span className="text-slate-600">Monto a enviar:</span><span className="font-bold">S/ {parseFloat(topupForm.amount).toFixed(2)}</span></div>
@@ -1038,6 +1040,33 @@ export default function App() {
                  </table>
              </div>
           </div>
+        )}
+
+        {/* --- PERSONAL: RESTAURADO --- */}
+        {activeTab === 'USERS' && currentUser.role === 'ADMIN' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-fit">
+                    <h3 className="font-black text-slate-800 mb-4 border-b pb-4">Registrar Personal Nuevo</h3>
+                    <form onSubmit={handleAddStaff} className="space-y-4">
+                        <div>
+                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nombre del Cajero</label>
+                           <input type="text" required placeholder="Ej. Juan Pérez" value={newStaffForm.name} onChange={e=>setNewStaffForm({name: e.target.value})} className="w-full border p-2.5 rounded-lg focus:border-blue-500 outline-none text-sm mt-1" />
+                        </div>
+                        <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-lg shadow-sm transition-all mt-2">GUARDAR EN NUBE</button>
+                    </form>
+                </div>
+                <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 h-[75vh] overflow-y-auto">
+                    <h3 className="font-black text-slate-800 mb-4 border-b pb-4">Personal Autorizado</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {staff.map(emp => (
+                            <div key={emp.id} className="border border-slate-200 rounded-xl p-4 flex justify-between items-center bg-white shadow-sm">
+                                <div><div className="font-bold text-slate-800">{emp.name}</div><div className="text-[10px] text-slate-500 font-mono mt-0.5">Rol: {emp.role} • ID: {emp.id}</div></div>
+                                <button onClick={() => handleAdminDeleteStaff(emp.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors" title="Eliminar cajero del sistema"><Trash2 size={20}/></button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
         )}
 
       </main>
