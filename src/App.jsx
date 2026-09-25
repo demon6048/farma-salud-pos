@@ -307,7 +307,6 @@ export default function App() {
       setCashierLoginModal(false);
   };
 
-  // --- LÓGICA DE GESTIÓN DE PERSONAL (NUEVO) ---
   const handleAddStaff = async (e) => {
       e.preventDefault();
       if (!newStaffForm.name.trim()) return showAlert('Ingrese el nombre del cajero.', 'error');
@@ -677,7 +676,8 @@ export default function App() {
               <>
                 <button onClick={() => setActiveTab('POS')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'POS' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><ShoppingCart size={14} /> PUNTO DE VENTA</button>
                 <button onClick={() => setActiveTab('TOPUP')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'TOPUP' ? 'bg-purple-700 text-white' : 'text-slate-600 hover:bg-purple-50'}`}><Smartphone size={14} /> RECARGAS</button>
-                <button onClick={() => setActiveTab('HISTORY')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'HISTORY' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Clock size={14} /> HISTORIAL</button>
+                <button onClick={() => setActiveTab('HISTORY')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'HISTORY' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Clock size={14} /> HIST. VENTAS</button>
+                <button onClick={() => setActiveTab('TOPUPS_HIST')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'TOPUPS_HIST' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Smartphone size={14} /> HIST. RECARGAS</button>
                 <button onClick={() => setActiveTab('CASH')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'CASH' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><Activity size={14} /> CIERRE DE CAJA</button>
               </>
             ) : (
@@ -685,8 +685,8 @@ export default function App() {
                 <button onClick={() => setActiveTab('DASHBOARD')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'DASHBOARD' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><TrendingUp size={14} /> DASHBOARD</button>
                 <button onClick={() => setActiveTab('ADMIN_PROD')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'ADMIN_PROD' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Box size={14} /> CATÁLOGO</button>
                 <button onClick={() => setActiveTab('INVOICES')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'INVOICES' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Truck size={14} /> COMPRAS</button>
-                <button onClick={() => setActiveTab('HISTORY')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'HISTORY' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Clock size={14} /> VENTAS</button>
-                <button onClick={() => setActiveTab('TOPUPS_HIST')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'TOPUPS_HIST' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Smartphone size={14} /> RECARGAS</button>
+                <button onClick={() => setActiveTab('HISTORY')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'HISTORY' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Clock size={14} /> HIST. VENTAS</button>
+                <button onClick={() => setActiveTab('TOPUPS_HIST')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'TOPUPS_HIST' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Smartphone size={14} /> HIST. RECARGAS</button>
                 <button onClick={() => setActiveTab('EXPIRIES')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'EXPIRIES' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><AlertTriangle size={14} /> VENCIMIENTOS</button>
                 <button onClick={() => setActiveTab('USERS')} className={`px-4 py-2.5 text-xs font-bold rounded-lg flex items-center gap-2 ${activeTab === 'USERS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'}`}><Users size={14} /> PERSONAL</button>
               </>
@@ -813,7 +813,7 @@ export default function App() {
             </div>
         )}
 
-        {/* HISTORIAL GENERAL (CAJERO) */}
+        {/* HISTORIAL GENERAL DE VENTAS FARMACIA */}
         {activeTab === 'HISTORY' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
              <div className="flex justify-between items-center border-b pb-4 mb-4">
@@ -837,6 +837,7 @@ export default function App() {
                                         <button onClick={() => handlePrintReal(s)} className="p-2 bg-white border shadow-sm hover:text-blue-600 rounded-lg"><Printer size={16}/></button>
                                         <button onClick={() => handleDownloadPDF(s)} className="p-2 bg-white border shadow-sm hover:text-emerald-600 rounded-lg"><Download size={16}/></button>
                                         {s.status === 'COMPLETADA' && <button onClick={() => requestVoid(s.id)} className="p-2 bg-white border shadow-sm text-red-500 hover:bg-red-50 rounded-lg" title="Anular"><XCircle size={16}/></button>}
+                                        {currentUser.role === 'ADMIN' && <button onClick={() => handleAdminDeleteSale(s.id)} className="p-2 bg-white border border-red-200 shadow-sm text-red-600 hover:bg-red-600 hover:text-white rounded-lg transition-colors" title="BORRAR DEFINITIVAMENTE (ADMIN)"><Trash2 size={16}/></button>}
                                     </div>
                                  </td>
                              </tr>
@@ -847,8 +848,8 @@ export default function App() {
           </div>
         )}
 
-        {/* HISTORIAL RECARGAS ADMIN */}
-        {activeTab === 'TOPUPS_HIST' && currentUser.role === 'ADMIN' && (
+        {/* HISTORIAL RECARGAS (COMPARTIDO CAJERO Y ADMIN) */}
+        {activeTab === 'TOPUPS_HIST' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
              <div className="flex justify-between items-center border-b pb-4 mb-4">
                 <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Smartphone /> Historial de Recargas Billetera</h3>
@@ -856,13 +857,14 @@ export default function App() {
              <div className="overflow-x-auto flex-1">
                  <table className="w-full text-left text-sm">
                      <thead className="bg-slate-50 uppercase text-[10px] text-slate-500 sticky top-0">
-                         <tr><th className="p-4">Ticket</th><th className="p-4">Fecha/Hora</th><th className="p-4">Celular/Billetera</th><th className="p-4 text-right">Enviado</th><th className="p-4 text-right text-purple-600">Comisión</th><th className="p-4 text-right font-black">Total Cobrado</th><th className="p-4 text-center">Acciones</th></tr>
+                         <tr><th className="p-4">Ticket</th><th className="p-4">Fecha/Hora</th><th className="p-4">Cajero</th><th className="p-4">Celular/Billetera</th><th className="p-4 text-right">Enviado</th><th className="p-4 text-right text-purple-600">Comisión</th><th className="p-4 text-right font-black">Total Cobrado</th><th className="p-4 text-center">Acciones</th></tr>
                      </thead>
                      <tbody className="divide-y divide-slate-100">
                          {topups.map(t => (
                              <tr key={t.id} className="hover:bg-slate-50">
                                  <td className="p-4 font-mono font-bold text-slate-700">{t.id}</td>
                                  <td className="p-4 text-slate-500 text-xs">{t.date} <span className="font-mono">{t.time}</span></td>
+                                 <td className="p-4 font-bold text-slate-700">{t.seller}</td>
                                  <td className="p-4 font-bold text-slate-700">{t.phone} <span className="text-[10px] bg-slate-100 px-1 rounded ml-1">{t.provider}</span></td>
                                  <td className="p-4 text-right font-medium">S/ {t.amount.toFixed(2)}</td>
                                  <td className="p-4 text-right font-bold text-purple-600">+ S/ {t.fee.toFixed(2)}</td>
@@ -870,7 +872,8 @@ export default function App() {
                                  <td className="p-4 text-center">
                                     <div className="flex justify-center gap-2">
                                         <button onClick={() => handlePrintReal(t, true)} className="p-2 bg-white border shadow-sm hover:text-blue-600 rounded-lg"><Printer size={16}/></button>
-                                        <button onClick={() => handleAdminDeleteTopup(t.id)} className="p-2 bg-white border border-red-200 shadow-sm text-red-600 hover:bg-red-600 hover:text-white rounded-lg transition-colors" title="Eliminar Recarga"><Trash2 size={16}/></button>
+                                        <button onClick={() => handleDownloadPDF(t, true)} className="p-2 bg-white border shadow-sm hover:text-emerald-600 rounded-lg"><Download size={16}/></button>
+                                        {currentUser.role === 'ADMIN' && <button onClick={() => handleAdminDeleteTopup(t.id)} className="p-2 bg-white border border-red-200 shadow-sm text-red-600 hover:bg-red-600 hover:text-white rounded-lg transition-colors" title="Eliminar Recarga"><Trash2 size={16}/></button>}
                                     </div>
                                  </td>
                              </tr>
@@ -1008,38 +1011,6 @@ export default function App() {
                     </table>
                 </div>
             </div>
-        )}
-
-        {activeTab === 'HISTORY' && currentUser.role === 'ADMIN' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[75vh]">
-             <div className="flex justify-between items-center border-b pb-4 mb-4">
-                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Clock /> Historial de Ventas (Admin)</h3>
-             </div>
-             <div className="overflow-x-auto flex-1">
-                 <table className="w-full text-left text-sm">
-                     <thead className="bg-slate-50 uppercase text-[10px] text-slate-500 sticky top-0">
-                         <tr><th className="p-4">Comprobante</th><th className="p-4">Fecha/Hora</th><th className="p-4">Cajero</th><th className="p-4 text-right">Monto</th><th className="p-4 text-center">Estado</th><th className="p-4 text-center">Acciones</th></tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-100">
-                         {sales.map(s => (
-                             <tr key={s.id} className="hover:bg-slate-50">
-                                 <td className="p-4 font-mono font-bold text-slate-700">{s.id}</td>
-                                 <td className="p-4 text-slate-500 text-xs">{s.date} <span className="font-mono">{s.time}</span></td>
-                                 <td className="p-4 font-bold text-slate-700">{s.seller}</td>
-                                 <td className="p-4 text-right font-black text-slate-900">S/ {s.total.toFixed(2)}</td>
-                                 <td className="p-4 text-center">{s.status === 'COMPLETADA' ? <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-[10px] font-black">COMPLETO</span> : <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-[10px] font-black">ANULADA</span>}</td>
-                                 <td className="p-4 text-center">
-                                    <div className="flex justify-center gap-2">
-                                        <button onClick={() => handlePrintReal(s)} className="p-2 bg-white border shadow-sm hover:text-blue-600 rounded-lg"><Printer size={16}/></button>
-                                        <button onClick={() => handleAdminDeleteSale(s.id)} className="p-2 bg-white border border-red-200 shadow-sm text-red-600 hover:bg-red-600 hover:text-white rounded-lg transition-colors" title="BORRAR DEFINITIVAMENTE (ADMIN)"><Trash2 size={16}/></button>
-                                    </div>
-                                 </td>
-                             </tr>
-                         ))}
-                     </tbody>
-                 </table>
-             </div>
-          </div>
         )}
 
         {/* --- PERSONAL: RESTAURADO --- */}
