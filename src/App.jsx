@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, LogOut, Package, ShieldAlert, BarChart3, AlertTriangle, CheckCircle, XCircle, Search, Edit3, Clock, ArrowDownCircle, ArrowUpCircle, AlertCircle, Box, TrendingUp, Truck, FileText, Activity, Calendar, CalendarDays, CalendarRange, DollarSign, Target, Download, Users, UserPlus, Wifi, WifiOff, Database, Printer, Trash2, Smartphone } from 'lucide-react';
+import { ShoppingCart, LogOut, Package, ShieldAlert, BarChart3, AlertTriangle, CheckCircle, XCircle, Search, Edit3, Clock, ArrowDownCircle, ArrowUpCircle, AlertCircle, Box, TrendingUp, Truck, FileText, Activity, Calendar, CalendarDays, CalendarRange, DollarSign, Target, Download, Users, UserPlus, Wifi, WifiOff, Database, Printer, Trash2, Smartphone, Lock } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, getDocs, limit, query, deleteDoc } from 'firebase/firestore';
 
@@ -26,6 +26,13 @@ const INITIAL_STAFF = [
 ];
 
 export default function App() {
+  // --- ESTADO DEL BLINDAJE GLOBAL ---
+  const [isSystemUnlocked, setIsSystemUnlocked] = useState(() => localStorage.getItem('fs_global_lock') === 'unlocked');
+  const [globalPassword, setGlobalPassword] = useState('');
+  const [unlockError, setUnlockError] = useState('');
+  const [isUnlocking, setIsUnlocking] = useState(false);
+
+  // --- ESTADOS EXISTENTES DEL SISTEMA ---
   const [currentUser, setCurrentUser] = useState(() => JSON.parse(localStorage.getItem('fs_user')) || null);
   const [cashSession, setCashSession] = useState(() => JSON.parse(localStorage.getItem('fs_cash')) || { isOpen: false, openingAmount: 0, declaredAmount: null, result: null, shiftId: null });
   
@@ -70,11 +77,29 @@ export default function App() {
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // --- FUNCIÓN DE DESBLOQUEO GLOBAL ---
+  const handleGlobalUnlock = (e) => {
+      e.preventDefault();
+      setIsUnlocking(true);
+      setUnlockError('');
+      
+      setTimeout(() => {
+          if (globalPassword === '10448145579') {
+              localStorage.setItem('fs_global_lock', 'unlocked');
+              setIsSystemUnlocked(true);
+          } else {
+              setUnlockError('RUC o contraseña incorrecta. Acceso denegado.');
+              setIsUnlocking(false);
+          }
+      }, 1500);
+  };
+
   useEffect(() => { if (currentUser) localStorage.setItem('fs_user', JSON.stringify(currentUser)); }, [currentUser]);
   useEffect(() => { localStorage.setItem('fs_cash', JSON.stringify(cashSession)); }, [cashSession]);
 
   useEffect(() => {
-    if (!db) {
+    if (!db || !isSystemUnlocked) {
+       if(!isSystemUnlocked) return; 
        setDbStatus('LOCAL');
        return;
     }
@@ -111,7 +136,7 @@ export default function App() {
         }
     };
     initFirebase();
-  }, []);
+  }, [isSystemUnlocked]);
 
   const formatCurrency = (amount) => `S/ ${parseFloat(amount).toFixed(2)}`;
   const getTimestamp = () => {
@@ -485,8 +510,9 @@ export default function App() {
   const handlePinSubmit = (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    if (formData.get('pin') !== '1234') {
-        return setAuthModal(prev => ({ ...prev, error: 'PIN INCORRECTO.' }));
+    // Cambiamos el PIN de verificación por la nueva clave robusta de Admin
+    if (formData.get('pin') !== '44814557FA') {
+        return setAuthModal(prev => ({ ...prev, error: 'CLAVE INCORRECTA.' }));
     }
     if (authModal.action === 'VOID_SALE') executeVoid(authModal.payload, formData.get('reason'));
     setAuthModal({ isOpen: false, action: null, payload: null, error: '' });
@@ -618,6 +644,67 @@ export default function App() {
       return { dailyRevenue, totalInvestment, netProfit, totalTopupFees, ticketsCount: todaySales.length, topupCount: todayTopups.length };
   };
 
+  // ============================================================================
+  // PANTALLA DE BLOQUEO GLOBAL (PRECARGA)
+  // ============================================================================
+  if (!isSystemUnlocked) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+          {/* Fondo elegante */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-black"></div>
+          
+          <div className="relative z-10 bg-white/5 backdrop-blur-xl p-8 sm:p-12 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-8 duration-700">
+             <div className="bg-white p-4 rounded-2xl inline-block mb-6 shadow-xl">
+                 <img src="https://i.imgur.com/rMiaZmc.png" alt="Logo" className="h-16 sm:h-20 object-contain drop-shadow-md" />
+             </div>
+             
+             <h2 className="text-2xl font-black text-white mb-2 tracking-widest flex items-center justify-center gap-2">
+                 <Lock size={24} className="text-blue-400" /> ACCESO RESTRINGIDO
+             </h2>
+             <p className="text-slate-400 text-sm mb-8">Por favor, ingrese la Clave RUC empresarial para inicializar el sistema.</p>
+             
+             <form onSubmit={handleGlobalUnlock} className="space-y-6">
+                 <div>
+                     <input 
+                         type="password" 
+                         value={globalPassword} 
+                         onChange={e=>setGlobalPassword(e.target.value)} 
+                         className="w-full px-4 py-4 rounded-xl bg-black/40 border border-slate-600 text-white text-center tracking-[0.5em] font-black text-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all shadow-inner" 
+                         placeholder="•••••••••••" 
+                         autoFocus 
+                     />
+                 </div>
+                 
+                 {unlockError && (
+                     <div className="text-red-400 text-xs font-bold bg-red-900/30 py-2 rounded-lg border border-red-500/30 animate-pulse">
+                         {unlockError}
+                     </div>
+                 )}
+                 
+                 <button 
+                     type="submit" 
+                     disabled={isUnlocking || !globalPassword} 
+                     className={`w-full py-4 font-black rounded-xl shadow-lg transition-all flex justify-center items-center gap-3 text-lg ${isUnlocking ? 'bg-blue-600 cursor-wait text-white' : 'bg-blue-600 hover:bg-blue-500 hover:shadow-blue-500/25 text-white disabled:bg-slate-700 disabled:text-slate-500'}`}
+                 >
+                     {isUnlocking ? (
+                         <><div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div> DESCARGANDO DATOS...</>
+                     ) : (
+                         'INICIALIZAR SISTEMA'
+                     )}
+                 </button>
+             </form>
+
+             <div className="mt-8 pt-6 border-t border-white/10 flex justify-center items-center gap-2 text-slate-500 text-xs font-medium">
+                 <ShieldAlert size={14} /> Sistema Encriptado End-to-End
+             </div>
+          </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // APLICACIÓN PRINCIPAL
+  // ============================================================================
   const metrics = getDashboardMetrics();
   const displayedProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -1080,7 +1167,7 @@ export default function App() {
             <form onSubmit={handlePinSubmit} className="space-y-4">
               {authModal.error && <div className="bg-red-50 text-red-600 text-[10px] p-2 rounded font-bold text-center border">{authModal.error}</div>}
               <input name="reason" type="text" required placeholder="Motivo de anulación..." className="w-full px-3 py-2 border rounded-lg text-sm" autoFocus />
-              <input name="pin" type="password" required placeholder="PIN ADMIN (1234)" maxLength="4" className="w-full px-3 py-2 border rounded-lg text-xl text-center font-black" />
+              <input name="pin" type="password" required placeholder="CLAVE ADMIN" className="w-full px-3 py-2 border rounded-lg text-xl text-center font-black" />
               <div className="flex gap-2"><button type="button" onClick={() => setAuthModal({ isOpen: false, action: null, payload: null, error: '' })} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-sm">CANCELAR</button><button type="submit" className="flex-1 py-3 bg-red-600 text-white font-black rounded-xl text-sm">AUTORIZAR</button></div>
             </form>
           </div>
@@ -1108,8 +1195,8 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl border-t-4 border-blue-500">
             <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><ShieldAlert className="text-blue-500"/> Clave Administrativa</h3>
-            <form onSubmit={(e) => { e.preventDefault(); if(new FormData(e.target).get('password') === '1234') handleAdminLogin(); else { showAlert('Clave incorrecta', 'error'); addAuditLog("SEGURIDAD", "Intento fallido Admin"); } }}>
-              <input name="password" type="password" required placeholder="Ingrese 1234" className="w-full p-4 bg-slate-50 border rounded-xl text-center font-black text-2xl tracking-widest mb-4" autoFocus />
+            <form onSubmit={(e) => { e.preventDefault(); if(new FormData(e.target).get('password') === '44814557FA') handleAdminLogin(); else { showAlert('Clave incorrecta', 'error'); addAuditLog("SEGURIDAD", "Intento fallido Admin"); } }}>
+              <input name="password" type="password" required placeholder="Clave Administrador" className="w-full p-4 bg-slate-50 border rounded-xl text-center font-black text-xl tracking-widest mb-4" autoFocus />
               <div className="flex gap-2">
                  <button type="button" onClick={()=>setAdminLoginModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl text-sm">CANCELAR</button>
                  <button type="submit" className="flex-1 py-3 bg-slate-900 text-white font-black rounded-xl text-sm">INGRESAR</button>
