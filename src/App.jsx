@@ -88,7 +88,7 @@ export default function App() {
               localStorage.setItem('fs_global_lock', 'unlocked');
               setIsSystemUnlocked(true);
           } else {
-              setUnlockError('RUC o contraseña incorrecta. Acceso denegado.');
+              setUnlockError('Clave de seguridad incorrecta. Acceso denegado.');
               setIsUnlocking(false);
           }
       }, 1500);
@@ -510,7 +510,6 @@ export default function App() {
   const handlePinSubmit = (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    // Cambiamos el PIN de verificación por la nueva clave robusta de Admin
     if (formData.get('pin') !== '44814557FA') {
         return setAuthModal(prev => ({ ...prev, error: 'CLAVE INCORRECTA.' }));
     }
@@ -661,7 +660,7 @@ export default function App() {
              <h2 className="text-2xl font-black text-white mb-2 tracking-widest flex items-center justify-center gap-2">
                  <Lock size={24} className="text-blue-400" /> ACCESO RESTRINGIDO
              </h2>
-             <p className="text-slate-400 text-sm mb-8">Por favor, ingrese la Clave RUC empresarial para inicializar el sistema.</p>
+             <p className="text-slate-400 text-sm mb-8">Por favor, ingrese la clave de seguridad para inicializar el sistema.</p>
              
              <form onSubmit={handleGlobalUnlock} className="space-y-6">
                  <div>
