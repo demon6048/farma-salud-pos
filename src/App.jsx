@@ -25,6 +25,13 @@ const INITIAL_STAFF = [
   { id: 'CAJ-001', name: 'Administrador Principal', role: 'ADMIN', joined: '10/09/2026' }
 ];
 
+// Función auxiliar para extraer categorías únicas de los productos existentes
+const getUniqueCategories = (products) => {
+    const defaultCategories = ["Analgésicos", "Antibióticos", "Antiinflamatorios", "Insumos"];
+    const productCategories = products.map(p => p.category).filter(c => c);
+    return [...new Set([...defaultCategories, ...productCategories])].sort();
+};
+
 export default function App() {
   // --- ESTADO DEL BLINDAJE GLOBAL ---
   const [isSystemUnlocked, setIsSystemUnlocked] = useState(() => localStorage.getItem('fs_global_lock') === 'unlocked');
@@ -63,7 +70,8 @@ export default function App() {
   const [alerts, setAlerts] = useState([]);
   
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, text: '', onConfirm: null });
-  const [promptDialog, setPromptDialog] = useState({ isOpen: false, title: '', value: '', onConfirm: null });
+  const [promptDialog, setPromptDialog] = useState({ isOpen: false, title: '', value: '', type: 'number', onConfirm: null });
+  const [editInvoiceForm, setEditInvoiceForm] = useState(null); // Estado para el modal de edición de compras
   
   const [openingAmount, setOpeningAmount] = useState(''); 
   const [closingAmount, setClosingAmount] = useState('');
@@ -528,11 +536,33 @@ export default function App() {
     }
   };
 
+  const handleCategoryChange = (e) => {
+      const val = e.target.value;
+      if (val === 'NEW_CATEGORY') {
+          setPromptDialog({
+              isOpen: true,
+              title: "Nombre de la Nueva Categoría",
+              value: "",
+              type: "text",
+              onConfirm: (newCat) => {
+                  if(newCat.trim()) {
+                      setNewProductForm({...newProductForm, category: newCat.trim()});
+                  } else {
+                      setNewProductForm({...newProductForm, category: ""});
+                  }
+              }
+          });
+      } else {
+          setNewProductForm({...newProductForm, category: val});
+      }
+  };
+
   const handleEditProductPrice = (product) => {
       setPromptDialog({
           isOpen: true,
           title: `Nuevo precio para ${product.name} (S/)`,
           value: product.price,
+          type: "number",
           onConfirm: async (val) => {
               const newPrice = parseFloat(val);
               if(isNaN(newPrice) || newPrice < 0) return showAlert('Precio inválido', 'error');
@@ -583,6 +613,39 @@ export default function App() {
         showAlert("Inventario actualizado.", "success");
         setInvoiceForm({ supplier: '', document: '', productId: '', qty: '', lote: '', expDate: '', totalCost: '' });
     }
+  };
+
+  const handleEditInvoiceSubmit = async (e) => {
+      e.preventDefault();
+      if (!editInvoiceForm) return;
+      const { id, supplier, document: docNum, qty, lote, expDate, cost } = editInvoiceForm;
+      const originalInvoice = invoices.find(inv => inv.id === id);
+      if (!originalInvoice) return;
+
+      const numQty = parseInt(qty);
+      const diffQty = numQty - originalInvoice.qty;
+      const product = products.find(p => p.id === originalInvoice.productId);
+
+      if (dbStatus === 'CONECTADO' && product) {
+          // Actualizar el lote específico
+          let updatedLots = [...(product.lots || [])];
+          const lotIndex = updatedLots.findIndex(l => l.id === originalInvoice.lotId);
+          if (lotIndex !== -1) {
+              updatedLots[lotIndex] = { ...updatedLots[lotIndex], lote: lote.trim().toUpperCase(), exp: expDate, qty: numQty };
+          }
+
+          // Recalcular stock
+          const newStock = Math.max(0, product.stock + diffQty);
+          await setDoc(doc(db, 'products', product.id), { ...product, stock: newStock, lots: updatedLots });
+
+          // Actualizar factura
+          const updatedInvoice = { ...originalInvoice, supplier, document: docNum, qty: numQty, cost: parseFloat(cost), lote: lote.trim().toUpperCase() };
+          await setDoc(doc(db, 'invoices', id), updatedInvoice);
+
+          addAuditLog("EDITA FACTURA", `Factura ${docNum} corregida`);
+          showAlert('Factura editada correctamente.', 'success');
+          setEditInvoiceForm(null);
+      }
   };
 
   const handleDeleteInvoice = (invoice) => {
@@ -1017,7 +1080,17 @@ export default function App() {
                     <h3 className="font-black mb-4 border-b pb-4">Añadir Producto</h3>
                     <form onSubmit={handleAddProduct} className="space-y-4">
                         <input type="text" required placeholder="Nombre" value={newProductForm.name} onChange={e=>setNewProductForm({...newProductForm, name: e.target.value})} className="w-full border p-2 text-sm rounded-lg" />
-                        <select required value={newProductForm.category} onChange={e=>setNewProductForm({...newProductForm, category: e.target.value})} className="w-full border p-2 text-sm rounded-lg"><option value="">Categoría...</option><option value="Analgésicos">Analgésicos</option><option value="Antibióticos">Antibióticos</option><option value="Antiinflamatorios">Antiinflamatorios</option><option value="Insumos">Insumos</option></select>
+                        <select required value={newProductForm.category} onChange={handleCategoryChange} className="w-full border p-2 text-sm rounded-lg">
+                            <option value="">Seleccione Categoría...</option>
+                            {getUniqueCategories(products).map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                            <option value="NEW_CATEGORY" className="font-bold text-blue-600">➕ Agregar nueva categoría...</option>
+                        </select>
+                        {/* Campo visible de validación visual (Opcional pero útil) */}
+                        {newProductForm.category && getUniqueCategories(products).indexOf(newProductForm.category) === -1 && (
+                             <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-200">Nueva categoría a crear: {newProductForm.category}</div>
+                        )}
                         <input type="number" step="0.10" required placeholder="Precio (S/)" value={newProductForm.price} onChange={e=>setNewProductForm({...newProductForm, price: e.target.value})} className="w-full border p-2 text-sm rounded-lg text-center font-bold" />
                         <button type="submit" className="w-full py-3 bg-blue-600 text-white font-black rounded-lg">GUARDAR</button>
                     </form>
@@ -1029,7 +1102,7 @@ export default function App() {
                             <thead className="bg-slate-50 uppercase text-[10px] sticky top-0"><tr><th className="p-4">Cód</th><th className="p-4">Producto</th><th className="p-4 text-center">Stock</th><th className="p-4 text-right">Precio</th><th className="p-4 text-center">Acciones</th></tr></thead>
                             <tbody>
                                 {displayedProducts.map(p => (
-                                    <tr key={p.id} className="border-b"><td className="p-4 text-xs font-mono">{p.id}</td><td className="p-4 font-bold">{p.name}</td><td className="p-4 text-center font-black">{p.stock}</td><td className="p-4 text-right font-black text-emerald-600">{formatCurrency(p.price)}</td>
+                                    <tr key={p.id} className="border-b"><td className="p-4 text-xs font-mono">{p.id}</td><td className="p-4 font-bold">{p.name} <span className="block text-[9px] text-slate-400 font-normal">{p.category}</span></td><td className="p-4 text-center font-black">{p.stock}</td><td className="p-4 text-right font-black text-emerald-600">{formatCurrency(p.price)}</td>
                                     <td className="p-4 text-center">
                                         <div className="flex gap-2 justify-center">
                                             <button onClick={()=>handleEditProductPrice(p)} className="p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-600 hover:text-white" title="Editar Precio"><Edit3 size={16}/></button>
@@ -1062,11 +1135,16 @@ export default function App() {
                     <h3 className="font-black mb-4 border-b pb-4">Historial de Compras</h3>
                     <div className="overflow-x-auto flex-1">
                         <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 uppercase text-[10px] sticky top-0"><tr><th className="p-4">Doc</th><th className="p-4">Fecha</th><th className="p-4">Detalle</th><th className="p-4 text-right">Inversión</th><th className="p-4 text-center">Eliminar</th></tr></thead>
+                            <thead className="bg-slate-50 uppercase text-[10px] sticky top-0"><tr><th className="p-4">Doc</th><th className="p-4">Fecha</th><th className="p-4">Detalle</th><th className="p-4 text-right">Inversión</th><th className="p-4 text-center">Acciones</th></tr></thead>
                             <tbody>
                                 {invoices.map(inv => (
-                                    <tr key={inv.id} className="border-b"><td className="p-4 font-mono text-xs">{inv.document}</td><td className="p-4 text-xs">{inv.date}</td><td className="p-4 font-bold">+{inv.qty} {inv.product}</td><td className="p-4 text-right font-black text-amber-600">S/ {inv.cost.toFixed(2)}</td>
-                                    <td className="p-4 text-center"><button onClick={() => handleDeleteInvoice(inv)} className="p-2 bg-red-50 text-red-600 rounded hover:bg-red-600 hover:text-white" title="Eliminar factura y revertir stock"><Trash2 size={16}/></button></td></tr>
+                                    <tr key={inv.id} className="border-b"><td className="p-4 font-mono text-xs">{inv.document}</td><td className="p-4 text-xs">{inv.date}</td><td className="p-4 font-bold">+{inv.qty} {inv.product}</td><td className="p-4 text-right font-black text-amber-600">S/ {inv.cost?.toFixed(2)}</td>
+                                    <td className="p-4 text-center">
+                                        <div className="flex gap-2 justify-center">
+                                            <button onClick={() => setEditInvoiceForm(inv)} className="p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-600 hover:text-white" title="Editar Factura"><Edit3 size={16}/></button>
+                                            <button onClick={() => handleDeleteInvoice(inv)} className="p-2 bg-red-50 text-red-600 rounded hover:bg-red-600 hover:text-white" title="Eliminar factura y revertir stock"><Trash2 size={16}/></button>
+                                        </div>
+                                    </td></tr>
                                 ))}
                             </tbody>
                         </table>
@@ -1147,8 +1225,8 @@ export default function App() {
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border-t-4 border-blue-500">
             <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Edit3 className="text-blue-500"/> {promptDialog.title}</h3>
             <div className="relative">
-                <span className="absolute left-4 top-3.5 text-xl font-bold text-slate-400">S/</span>
-                <input type="number" step="0.10" value={promptDialog.value} onChange={(e) => setPromptDialog({...promptDialog, value: e.target.value})} className="w-full pl-12 pr-4 py-3 bg-slate-50 border rounded-lg text-xl font-bold mb-6 outline-none focus:border-blue-500" autoFocus />
+                {(!promptDialog.type || promptDialog.type === 'number') && <span className="absolute left-4 top-3.5 text-xl font-bold text-slate-400">S/</span>}
+                <input type={promptDialog.type || "number"} step={promptDialog.type === 'number' ? "0.10" : undefined} value={promptDialog.value} onChange={(e) => setPromptDialog({...promptDialog, value: e.target.value})} className={`w-full ${(!promptDialog.type || promptDialog.type === 'number') ? 'pl-12' : 'px-4'} pr-4 py-3 bg-slate-50 border rounded-lg text-xl font-bold mb-6 outline-none focus:border-blue-500`} autoFocus />
             </div>
             <div className="flex gap-2">
               <button onClick={() => setPromptDialog({isOpen: false})} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-slate-600 hover:bg-slate-200">Cancelar</button>
@@ -1158,7 +1236,29 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL AUTORIZACIÓN PIN */}
+      {editInvoiceForm && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl border-t-4 border-blue-500">
+            <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Edit3 className="text-blue-500"/> Editar Factura</h3>
+            <form onSubmit={handleEditInvoiceSubmit} className="space-y-4">
+              <input type="text" required placeholder="Proveedor" value={editInvoiceForm.supplier} onChange={e=>setEditInvoiceForm({...editInvoiceForm, supplier: e.target.value})} className="w-full border p-2 text-sm rounded-lg" />
+              <input type="text" required placeholder="N° Doc" value={editInvoiceForm.document} onChange={e=>setEditInvoiceForm({...editInvoiceForm, document: e.target.value})} className="w-full border p-2 text-sm rounded-lg" />
+              <div className="flex gap-2">
+                  <input type="number" required placeholder="Cant." value={editInvoiceForm.qty} onChange={e=>setEditInvoiceForm({...editInvoiceForm, qty: e.target.value})} className="w-1/3 border p-2 text-sm rounded-lg text-center" />
+                  <input type="text" required placeholder="Lote" value={editInvoiceForm.lote} onChange={e=>setEditInvoiceForm({...editInvoiceForm, lote: e.target.value})} className="w-2/3 border p-2 text-sm rounded-lg" />
+              </div>
+              <input type="date" required value={editInvoiceForm.expDate} onChange={e=>setEditInvoiceForm({...editInvoiceForm, expDate: e.target.value})} className="w-full border p-2 text-sm rounded-lg" />
+              <input type="number" step="0.10" required placeholder="Costo Total (S/)" value={editInvoiceForm.cost} onChange={e=>setEditInvoiceForm({...editInvoiceForm, cost: e.target.value})} className="w-full border p-2 text-sm rounded-lg font-bold" />
+              
+              <div className="flex gap-2 mt-4">
+                 <button type="button" onClick={()=>setEditInvoiceForm(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl text-sm">CANCELAR</button>
+                 <button type="submit" className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-sm shadow-md">ACTUALIZAR</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {authModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full border-t-4 border-t-red-500 p-6">
