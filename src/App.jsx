@@ -550,6 +550,9 @@ export default function App() {
                   } else {
                       setNewProductForm({...newProductForm, category: ""});
                   }
+              },
+              onCancel: () => {
+                  setNewProductForm({...newProductForm, category: ""});
               }
           });
       } else {
@@ -1085,12 +1088,11 @@ export default function App() {
                             {getUniqueCategories(products).map(cat => (
                                 <option key={cat} value={cat}>{cat}</option>
                             ))}
+                            {newProductForm.category && !getUniqueCategories(products).includes(newProductForm.category) && newProductForm.category !== 'NEW_CATEGORY' && (
+                                <option value={newProductForm.category}>{newProductForm.category}</option>
+                            )}
                             <option value="NEW_CATEGORY" className="font-bold text-blue-600">➕ Agregar nueva categoría...</option>
                         </select>
-                        {/* Campo visible de validación visual (Opcional pero útil) */}
-                        {newProductForm.category && getUniqueCategories(products).indexOf(newProductForm.category) === -1 && (
-                             <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 p-2 rounded border border-emerald-200">Nueva categoría a crear: {newProductForm.category}</div>
-                        )}
                         <input type="number" step="0.10" required placeholder="Precio (S/)" value={newProductForm.price} onChange={e=>setNewProductForm({...newProductForm, price: e.target.value})} className="w-full border p-2 text-sm rounded-lg text-center font-bold" />
                         <button type="submit" className="w-full py-3 bg-blue-600 text-white font-black rounded-lg">GUARDAR</button>
                     </form>
@@ -1229,7 +1231,7 @@ export default function App() {
                 <input type={promptDialog.type || "number"} step={promptDialog.type === 'number' ? "0.10" : undefined} value={promptDialog.value} onChange={(e) => setPromptDialog({...promptDialog, value: e.target.value})} className={`w-full ${(!promptDialog.type || promptDialog.type === 'number') ? 'pl-12' : 'px-4'} pr-4 py-3 bg-slate-50 border rounded-lg text-xl font-bold mb-6 outline-none focus:border-blue-500`} autoFocus />
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setPromptDialog({isOpen: false})} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-slate-600 hover:bg-slate-200">Cancelar</button>
+              <button onClick={() => { if(promptDialog.onCancel) promptDialog.onCancel(); setPromptDialog({isOpen: false}); }} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-slate-600 hover:bg-slate-200">Cancelar</button>
               <button onClick={() => { promptDialog.onConfirm(promptDialog.value); setPromptDialog({isOpen: false}); }} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 font-black text-white rounded-xl shadow-md">Guardar</button>
             </div>
           </div>
