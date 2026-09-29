@@ -25,11 +25,11 @@ const INITIAL_STAFF = [
   { id: 'CAJ-001', name: 'Administrador Principal', role: 'ADMIN', joined: '10/09/2026' }
 ];
 
-// Función auxiliar para extraer categorías únicas de los productos existentes
-const getUniqueCategories = (products) => {
+// Función auxiliar para extraer categorías únicas de los productos y base de datos
+const getUniqueCategories = (products, dbCategories = []) => {
     const defaultCategories = ["Analgésicos", "Antibióticos", "Antiinflamatorios", "Insumos"];
     const productCategories = products.map(p => p.category).filter(c => c);
-    return [...new Set([...defaultCategories, ...productCategories])].sort();
+    return [...new Set([...defaultCategories, ...dbCategories, ...productCategories])].sort();
 };
 
 export default function App() {
@@ -57,6 +57,7 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState('VERIFICANDO...'); 
   
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [staff, setStaff] = useState(INITIAL_STAFF);
   const [sales, setSales] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -136,8 +137,16 @@ export default function App() {
             const unsubTopups = onSnapshot(collection(db, 'topups'), (snap) => {
                 setTopups(snap.docs.map(d => d.data()).sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0)));
             });
+            const unsubCategories = onSnapshot(collection(db, 'categories'), (snap) => {
+                if (snap.empty) {
+                    const defaultCats = ["Analgésicos", "Antibióticos", "Antiinflamatorios", "Insumos"];
+                    defaultCats.forEach(c => setDoc(doc(db, 'categories', c.toUpperCase()), { name: c }));
+                } else {
+                    setCategories(snap.docs.map(d => d.data().name));
+                }
+            });
 
-            return () => { unsubProducts(); unsubStaff(); unsubSales(); unsubInvoices(); unsubAudit(); unsubTopups(); };
+            return () => { unsubProducts(); unsubStaff(); unsubSales(); unsubInvoices(); unsubAudit(); unsubTopups(); unsubCategories(); };
         } catch (error) {
             setDbStatus('LOCAL');
             showAlert("Conexión rechazada. Reglas cerradas.", "error");
@@ -544,9 +553,14 @@ export default function App() {
               title: "Nombre de la Nueva Categoría",
               value: "",
               type: "text",
-              onConfirm: (newCat) => {
-                  if(newCat.trim()) {
-                      setNewProductForm({...newProductForm, category: newCat.trim()});
+              onConfirm: async (newCat) => {
+                  const trimmed = newCat.trim();
+                  if(trimmed) {
+                      if (dbStatus === 'CONECTADO') {
+                          await setDoc(doc(db, 'categories', trimmed.toUpperCase()), { name: trimmed });
+                          addAuditLog("NUEVA CATEGORÍA", `Categoría agregada: ${trimmed}`);
+                      }
+                      setNewProductForm({...newProductForm, category: trimmed});
                   } else {
                       setNewProductForm({...newProductForm, category: ""});
                   }
@@ -1085,10 +1099,10 @@ export default function App() {
                         <input type="text" required placeholder="Nombre" value={newProductForm.name} onChange={e=>setNewProductForm({...newProductForm, name: e.target.value})} className="w-full border p-2 text-sm rounded-lg" />
                         <select required value={newProductForm.category} onChange={handleCategoryChange} className="w-full border p-2 text-sm rounded-lg">
                             <option value="">Seleccione Categoría...</option>
-                            {getUniqueCategories(products).map(cat => (
+                            {getUniqueCategories(products, categories).map(cat => (
                                 <option key={cat} value={cat}>{cat}</option>
                             ))}
-                            {newProductForm.category && !getUniqueCategories(products).includes(newProductForm.category) && newProductForm.category !== 'NEW_CATEGORY' && (
+                            {newProductForm.category && !getUniqueCategories(products, categories).includes(newProductForm.category) && newProductForm.category !== 'NEW_CATEGORY' && (
                                 <option value={newProductForm.category}>{newProductForm.category}</option>
                             )}
                             <option value="NEW_CATEGORY" className="font-bold text-blue-600">➕ Agregar nueva categoría...</option>
